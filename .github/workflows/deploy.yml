@@ -42,5 +42,25 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # Pages is (or was) in "deploy from a branch" mode, so every push also
+      # triggers a legacy build that publishes the raw source — which cannot
+      # render. The last deployment wins, so wait until the legacy build for
+      # this commit has finished (or two minutes) before deploying; that way
+      # the built bundle is the one that sticks. This is a no-op once the
+      # Pages source is switched to "GitHub Actions".
+      - name: Wait out the legacy branch build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 24); do
+            latest=$(curl -sf               -H "Authorization: Bearer $GH_TOKEN"               -H "Accept: application/vnd.github+json"               "https://api.github.com/repos/$GITHUB_REPOSITORY/pages/builds/latest" || true)
+            commit=$(jq -r '.commit // empty' <<<"$latest")
+            status=$(jq -r '.status // empty' <<<"$latest")
+            echo "latest pages build: commit=${commit:-none} status=${status:-none}"
+            if [ "$commit" = "$GITHUB_SHA" ] && [ "$status" != "building" ]; then
+              break
+            fi
+            sleep 5
+          done
       - id: deployment
         uses: actions/deploy-pages@v4
