@@ -15,10 +15,13 @@ import {
 import {
   cloneUser,
   episodeKey,
+  fetchRemoteUser,
   loadUser,
   persistUser,
+  pushRemoteUser,
   recordActivity,
 } from './lib/user.js'
+import { supabase } from './lib/supabase.js'
 import TabBar from './components/TabBar.jsx'
 import UpNext from './screens/UpNext.jsx'
 import Library from './screens/Library.jsx'
@@ -57,6 +60,10 @@ export default function App() {
 
   const [loaded, setLoaded] = useState(false)
   const [storageFailed, setStorageFailed] = useState(false)
+  const [syncFailed, setSyncFailed] = useState(false)
+  const [session, setSession] = useState(null)
+  const sessionRef = useRef(null)
+  sessionRef.current = session
   const [titles, setTitles] = useState({})
   const [trending, setTrending] = useState([])
 
@@ -106,6 +113,36 @@ export default function App() {
     document.body.dataset.theme = dark ? 'dark' : 'light'
   }, [dark])
 
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session))
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => setSession(next))
+    return () => sub.subscription.unsubscribe()
+  }, [])
+
+  // On sign-in, the account's record becomes the source of truth. A first
+  // sign-in has no row yet, so whatever is on this device seeds the account.
+  const syncedUserId = useRef(null)
+  useEffect(() => {
+    if (!loaded || !session || freshStart) return
+    if (syncedUserId.current === session.user.id) return
+    syncedUserId.current = session.user.id
+    ;(async () => {
+      try {
+        const remote = await fetchRemoteUser(supabase)
+        if (remote) {
+          setUser(remote)
+          persistUser(remote, { freshStart })
+        } else {
+          await pushRemoteUser(supabase, session.user.id, userRef.current)
+        }
+        setSyncFailed(false)
+      } catch {
+        syncedUserId.current = null
+        setSyncFailed(true)
+      }
+    })()
+  }, [loaded, session, freshStart, setUser])
+
   // Load the user, then resolve every title they have a relationship with.
   useEffect(() => {
     let cancelled = false
@@ -149,6 +186,12 @@ export default function App() {
       fn(next)
       setUser(next)
       if (!persistUser(next, { freshStart })) setStorageFailed(true)
+      const s = sessionRef.current
+      if (s && !freshStart) {
+        pushRemoteUser(supabase, s.user.id, next)
+          .then(() => setSyncFailed(false))
+          .catch(() => setSyncFailed(true))
+      }
     },
     [freshStart, setUser]
   )
@@ -332,6 +375,27 @@ export default function App() {
       setSearched(true)
     })
   }, [])
+
+  const account = useMemo(
+    () => ({
+      email: session?.user?.email ?? null,
+      signIn: async (email, password) => {
+        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        return error ? error.message : null
+      },
+      signUp: async (email, password) => {
+        const { data, error } = await supabase.auth.signUp({ email, password })
+        if (error) return error.message
+        return data.session ? null : 'Check your email to confirm your account, then sign in.'
+      },
+      signOut: async () => {
+        syncedUserId.current = null
+        await supabase.auth.signOut()
+        return null
+      },
+    }),
+    [session]
+  )
 
   // --- Derived views -------------------------------------------------------
 
@@ -592,6 +656,22 @@ export default function App() {
           </div>
         )}
 
+        {loaded && syncFailed && (
+          <div
+            role="status"
+            style={{
+              margin: '12px 20px 0',
+              padding: '10px 14px',
+              border: '1px solid var(--line)',
+              borderRadius: 12,
+              font: "400 12px 'IBM Plex Mono', monospace",
+              color: 'var(--sub)',
+            }}
+          >
+            Sync is offline — changes are saved on this device and will sync when you're back.
+          </div>
+        )}
+
         {loaded && storageFailed && (
           <div
             role="status"
@@ -648,7 +728,9 @@ export default function App() {
           />
         )}
 
-        {loaded && screen === 'stats' && <Stats tiles={statsView.tiles} topGenres={statsView.topGenres} />}
+        {loaded && screen === 'stats' && (
+          <Stats tiles={statsView.tiles} topGenres={statsView.topGenres} account={account} />
+        )}
       </div>
 
       <TabBar tab={tab} onSelect={goTab} />

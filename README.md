@@ -77,13 +77,37 @@ touches it, so swapping in a real API is a change to that one file.
 A first run seeds a lived-in library (six shows in progress, five films
 watched, five on the watchlist) so every screen has something to show.
 
-## State and storage
+## State, storage and sync
 
 Your record — watched episodes, watched films, watchlist, ratings, activity —
 persists to `localStorage` under `tideline.user.v1`. Sets do not survive JSON,
 so they are stored as arrays and rehydrated on read. When storage is
 unavailable (private browsing, a blocked origin), the app says so in a banner
 and runs from memory for the session.
+
+Signing in (the Account card on Stats) syncs that same record to a Supabase
+project — one `user_state` row per user holding the record as jsonb, guarded
+by row-level security so each user can only ever touch their own row. The app
+stays a static bundle: `supabase-js` talks to the project straight from the
+browser, so nothing about the GitHub Pages hosting changes, and the
+publishable key in `src/lib/supabase.js` is the client key Supabase designs
+to be shipped publicly.
+
+How the sync behaves:
+
+- **Guest mode is untouched.** Without an account everything works exactly as
+  before, on this device only.
+- **First sign-in adopts this device.** If the account has no record yet,
+  whatever you see locally becomes the account's record. After that, the
+  account is the source of truth on every device you sign in on.
+- **Every change pushes.** Mutations write localStorage first (so the app
+  never waits on the network), then upsert the record to the account. If the
+  push fails, a banner says changes are safe on this device, and the next
+  successful change re-syncs.
+- Account creation may ask you to confirm your email; the confirmation link's
+  landing page is configured in the Supabase dashboard (Auth → URL
+  Configuration), so set the Site URL there to the deployed URL if you want
+  that link to land somewhere sensible.
 
 ## Theme
 
