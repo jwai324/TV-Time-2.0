@@ -73,6 +73,8 @@ reproduced as-is:
 `src/data/catalog.js` is an in-memory table of fictional titles behind three
 async functions — `getTitle`, `getTrending`, `searchTitles`. Nothing else
 touches it, so swapping in a real API is a change to that one file.
+[docs/wiring-up-tmdb.md](./docs/wiring-up-tmdb.md) is a step-by-step guide to
+doing exactly that with TMDB.
 
 A first run seeds a lived-in library (six shows in progress, five films
 watched, five on the watchlist) so every screen has something to show.
