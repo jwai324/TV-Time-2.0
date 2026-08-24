@@ -134,25 +134,46 @@ export default function UpNext({ cards, dark, onDiscover }) {
                 </div>
               </button>
 
-              {!c.done && (
-                <button
-                  className="tl-focus tl-hover-mark"
-                  onClick={c.onMark}
-                  style={{
-                    flex: 'none',
-                    font: "500 13.5px 'Inter Tight', sans-serif",
-                    color: '#0E332F',
-                    background: 'var(--seafoam)',
-                    border: 'none',
-                    borderRadius: 10,
-                    padding: '11px 14px',
-                    cursor: 'pointer',
-                    minHeight: 44,
-                  }}
-                >
-                  Mark watched
-                </button>
-              )}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, flex: 'none' }}>
+                {!c.done && (
+                  <button
+                    className="tl-focus tl-hover-mark"
+                    onClick={c.onMark}
+                    style={{
+                      font: "500 13.5px 'Inter Tight', sans-serif",
+                      color: '#0E332F',
+                      background: 'var(--seafoam)',
+                      border: 'none',
+                      borderRadius: 10,
+                      padding: '11px 14px',
+                      cursor: 'pointer',
+                      minHeight: 44,
+                    }}
+                  >
+                    Mark watched
+                  </button>
+                )}
+                {c.canUndo && (
+                  <button
+                    className="tl-focus tl-hover-catch"
+                    onClick={c.onUndo}
+                    aria-label={`Undo — un-mark ${c.undoCode}`}
+                    title={`Un-mark ${c.undoCode}`}
+                    style={{
+                      font: "400 11px 'IBM Plex Mono', monospace",
+                      color: 'var(--sub)',
+                      background: 'none',
+                      border: '1px solid var(--line)',
+                      borderRadius: 8,
+                      padding: '7px 10px',
+                      cursor: 'pointer',
+                      minHeight: 32,
+                    }}
+                  >
+                    Undo
+                  </button>
+                )}
+              </div>
             </div>
 
             <TideBar pct={c.pct} height={5} crest={!c.done} animate />

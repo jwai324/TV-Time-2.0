@@ -22,6 +22,22 @@ export function nextUnwatched(title, watchedEpisodes) {
   return null
 }
 
+/**
+ * The episode Undo steps back from: the latest watched episode in air order
+ * before the first gap — or the final episode when the show is fully watched.
+ * Null when nothing is watched before the gap.
+ */
+export function lastWatched(title, watchedEpisodes) {
+  let last = null
+  for (const s of title.seasons) {
+    for (const ep of s.episodes) {
+      if (!watchedEpisodes.has(episodeKey(title.id, s.number, ep.number))) return last
+      last = { season: s.number, episode: ep.number, ep }
+    }
+  }
+  return last
+}
+
 /** `{ total, watched }` episode counts across every season. */
 export function counts(title, watchedEpisodes) {
   let total = 0

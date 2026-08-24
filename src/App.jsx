@@ -5,6 +5,7 @@ import {
   counts,
   episodeCode,
   lastTs,
+  lastWatched,
   nextUnwatched,
   pctOf,
   trackedIds,
@@ -80,7 +81,9 @@ export default function App() {
 
   const [openSeasons, setOpenSeasons] = useState({})
   const [anim, setAnim] = useState({})
-  const [finishedNow, setFinishedNow] = useState({})
+  // Cards pinned on screen mid-interaction: a show marked to completion, or
+  // undone back to zero watched, stays put instead of vanishing under the tap.
+  const [pinned, setPinned] = useState({})
 
   const timers = useRef(new Set())
   const later = useCallback((fn, ms) => {
@@ -201,9 +204,39 @@ export default function App() {
         // Keep a just-finished show on screen showing "All caught up" rather
         // than yanking the card out from under the tap.
         if (!nextUnwatched(title, userRef.current.watchedEpisodes)) {
-          setFinishedNow((f) => ({ ...f, [id]: true }))
+          setPinned((f) => ({ ...f, [id]: true }))
         }
         setAnim((a) => ({ ...a, [id]: 'in' }))
+        later(() => setAnim((a) => ({ ...a, [id]: null })), 40)
+      }, 190)
+    },
+    [anim, titles, mutate, later]
+  )
+
+  /**
+   * Step one episode back: un-mark the latest watched episode before the next
+   * unwatched one (the final episode, on a finished show), and withdraw its
+   * activity entry so ordering and stats read as if it was never marked.
+   */
+  const undoLast = useCallback(
+    (id) => {
+      if (anim[id]) return
+      const title = titles[id]
+      const target = lastWatched(title, userRef.current.watchedEpisodes)
+      if (!target) return
+
+      setAnim((a) => ({ ...a, [id]: 'undo-out' }))
+      later(() => {
+        const code = episodeCode(target.season, target.episode)
+        mutate((u) => {
+          u.watchedEpisodes.delete(episodeKey(id, target.season, target.episode))
+          const i = u.lastActivity.findIndex((a) => a.titleId === id && a.label === code)
+          if (i >= 0) u.lastActivity.splice(i, 1)
+        })
+        if (counts(title, userRef.current.watchedEpisodes).watched === 0) {
+          setPinned((f) => ({ ...f, [id]: true }))
+        }
+        setAnim((a) => ({ ...a, [id]: 'undo-in' }))
         later(() => setAnim((a) => ({ ...a, [id]: null })), 40)
       }, 190)
     },
@@ -306,10 +339,10 @@ export default function App() {
     return Object.values(titles).filter(
       (t) =>
         t.type === 'show' &&
-        counts(t, user.watchedEpisodes).watched > 0 &&
-        (pctOf(t, user) < 100 || finishedNow[t.id])
+        (counts(t, user.watchedEpisodes).watched > 0 || pinned[t.id]) &&
+        (pctOf(t, user) < 100 || pinned[t.id])
     )
-  }, [titles, user, finishedNow])
+  }, [titles, user, pinned])
 
   // Up Next is ordered by recent activity when it is first built, then holds
   // that order so a card never jumps while you are working down the list.
@@ -334,12 +367,19 @@ export default function App() {
         const title = titles[id]
         const next = nextUnwatched(title, user.watchedEpisodes)
         const state = anim[id]
+        // Mark slides the episode line up and out; Undo runs the same move
+        // in reverse, so the direction of travel matches the action.
         const infoStyle =
           state === 'out'
             ? { opacity: 0, transform: 'translateY(-6px)', transition: 'opacity .18s ease, transform .18s ease' }
-            : state === 'in'
-              ? { opacity: 0, transform: 'translateY(6px)', transition: 'none' }
-              : { opacity: 1, transform: 'none', transition: 'opacity .22s ease, transform .22s ease' }
+            : state === 'undo-out'
+              ? { opacity: 0, transform: 'translateY(6px)', transition: 'opacity .18s ease, transform .18s ease' }
+              : state === 'in'
+                ? { opacity: 0, transform: 'translateY(6px)', transition: 'none' }
+                : state === 'undo-in'
+                  ? { opacity: 0, transform: 'translateY(-6px)', transition: 'none' }
+                  : { opacity: 1, transform: 'none', transition: 'opacity .22s ease, transform .22s ease' }
+        const undoTarget = lastWatched(title, user.watchedEpisodes)
 
         return {
           id,
@@ -352,11 +392,14 @@ export default function App() {
           pct: pctOf(title, user),
           wash: wash(title),
           infoStyle,
+          canUndo: !!undoTarget,
+          undoCode: undoTarget ? episodeCode(undoTarget.season, undoTarget.episode) : '',
           onMark: () => markNext(id),
+          onUndo: () => undoLast(id),
           onOpen: () => openTitle(id),
         }
       })
-  }, [inProgress, titles, user, anim, markNext, openTitle])
+  }, [inProgress, titles, user, anim, markNext, undoLast, openTitle])
 
   const tracked = useMemo(
     () => (user ? trackedIds(user).map((id) => titles[id]).filter(Boolean) : []),
