@@ -58,9 +58,11 @@ These are deliberate choices in the design's logic, not accidents, so they are
 reproduced as-is:
 
 - A show you *just* finished stays on Up Next reading **All caught up** until
-  the next load, rather than vanishing under your tap.
+  the next load, rather than vanishing under your tap — it sinks to the bottom
+  of the list so what is still in progress stays on top.
 - Up Next fixes its order when first built and holds it, so cards never
-  reshuffle while you are working down the list.
+  reshuffle while you are working down the list; sinking a caught-up show is
+  the one exception.
 - A season opens by default when it holds your next unwatched episode — which
   means a season you fully complete closes itself.
 - `episodes this month` counts single-episode activity only; *Catch up* and

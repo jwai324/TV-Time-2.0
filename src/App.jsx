@@ -361,8 +361,11 @@ export default function App() {
 
   const cards = useMemo(() => {
     if (!user || !upOrder.current) return []
-    return upOrder.current
-      .filter((id) => inProgress.some((t) => t.id === id))
+    const held = upOrder.current.filter((id) => inProgress.some((t) => t.id === id))
+    // Caught-up shows sink to the bottom; each group keeps the held order, so
+    // nothing else shifts when a card finishes or an Undo brings it back.
+    const caughtUp = (id) => !nextUnwatched(titles[id], user.watchedEpisodes)
+    return [...held.filter((id) => !caughtUp(id)), ...held.filter(caughtUp)]
       .map((id) => {
         const title = titles[id]
         const next = nextUnwatched(title, user.watchedEpisodes)
