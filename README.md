@@ -19,7 +19,7 @@ npm run preview  # serve the built bundle
 | Screen | What it does |
 | --- | --- |
 | **Up Next** | Every show you are mid-way through, most recent activity first, each with its next unwatched episode, a one-tap **Mark watched**, and an **Undo** that steps back one episode. |
-| **Library** | Everything you track, filtered by All / Shows / Movies / Watchlist / Finished and sorted by recent activity, title, or progress. |
+| **Library** | Everything you track, filtered by All / Shows / Movies / Watchlist / Finished and sorted by recent activity (ties broken by the most hours left to watch), title, or progress. |
 | **Title detail** | Poster, synopsis and progress. Shows get season accordions with per-episode checkboxes, **Catch up**, and **Mark season watched**; films get a watched toggle and a five-star rating. |
 | **Discover** | Search across titles and genres, plus a trending row. Watchlist pills throughout. |
 | **Stats** | Hours watched, episodes this month, current streak, titles tracked, and a top-genres chart. |

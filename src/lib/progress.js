@@ -58,6 +58,18 @@ export function pctOf(title, user) {
   return total ? Math.round((watched / total) * 100) : 0
 }
 
+/** Minutes of unwatched runtime left on a title. */
+export function remainingMinutes(title, user) {
+  if (title.type === 'movie') return user.watchedMovies.has(title.id) ? 0 : title.runtimeMinutes
+  let mins = 0
+  for (const s of title.seasons) {
+    for (const ep of s.episodes) {
+      if (!user.watchedEpisodes.has(episodeKey(title.id, s.number, ep.number))) mins += ep.runtimeMinutes
+    }
+  }
+  return mins
+}
+
 /** Timestamp of the most recent activity on a title, or 0. */
 export function lastTs(user, titleId) {
   const a = user.lastActivity.find((x) => x.titleId === titleId)

@@ -7,6 +7,7 @@ import {
   lastTs,
   lastWatched,
   nextUnwatched,
+  remainingMinutes,
   pctOf,
   trackedIds,
   wash,
@@ -418,10 +419,14 @@ export default function App() {
       : filter === 'Finished' ? tracked.filter((t) => pctOf(t, user) === 100)
       : tracked
 
+    // Recent activity leads; titles that tie (none more recent than another,
+    // including everything untouched) rank by the most hours left to watch.
     const sorted = filtered.slice().sort((a, b) =>
       sortBy === 'alpha' ? a.name.localeCompare(b.name)
       : sortBy === 'progress' ? pctOf(b, user) - pctOf(a, user)
-      : lastTs(user, b.id) - lastTs(user, a.id) || a.name.localeCompare(b.name)
+      : lastTs(user, b.id) - lastTs(user, a.id) ||
+        remainingMinutes(b, user) - remainingMinutes(a, user) ||
+        a.name.localeCompare(b.name)
     )
 
     return sorted.map((t) => {
