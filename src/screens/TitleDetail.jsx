@@ -1,0 +1,322 @@
+import Poster from '../components/Poster.jsx'
+import TideBar from '../components/TideBar.jsx'
+
+export default function TitleDetail({ detail, dark, onBack }) {
+  return (
+    <>
+      <div style={{ padding: '16px 20px 0' }}>
+        <button
+          className="tl-focus-r6"
+          onClick={onBack}
+          style={{
+            font: "500 14px 'Inter Tight', sans-serif",
+            color: 'var(--aqua)',
+            background: 'none',
+            border: 'none',
+            padding: '10px 0',
+            cursor: 'pointer',
+            minHeight: 44,
+          }}
+        >
+          ← Back
+        </button>
+      </div>
+
+      {detail && (
+        <div style={{ padding: '6px 20px 0' }}>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+            <Poster title={detail.title} dark={dark} width={96} height={134} radius={10} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <h1
+                style={{
+                  margin: 0,
+                  font: "600 24px/1.1 'Bricolage Grotesque', sans-serif",
+                  letterSpacing: '-0.03em',
+                }}
+              >
+                {detail.name}
+              </h1>
+              <div
+                style={{
+                  font: "400 11.5px 'IBM Plex Mono', monospace",
+                  color: 'var(--drift)',
+                  marginTop: 8,
+                }}
+              >
+                {detail.meta}
+              </div>
+              {detail.isShow && (
+                <div
+                  style={{
+                    font: "400 12px 'IBM Plex Mono', monospace",
+                    color: 'var(--sub)',
+                    marginTop: 14,
+                  }}
+                >
+                  {detail.progressLine}
+                </div>
+              )}
+              <button
+                className="tl-focus tl-hover-pill"
+                onClick={detail.onWatchlist}
+                aria-pressed={detail.inWatchlist}
+                style={{
+                  marginTop: 10,
+                  font: "500 12.5px 'Inter Tight', sans-serif",
+                  color: 'var(--sub)',
+                  background: 'none',
+                  border: '1px solid var(--line)',
+                  borderRadius: 999,
+                  padding: '8px 13px',
+                  cursor: 'pointer',
+                }}
+              >
+                {detail.watchlistLabel}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 18 }}>
+            <TideBar
+              pct={detail.pct}
+              height={5}
+              radius={3}
+              crest={detail.pct > 0 && detail.pct < 100}
+              animate
+            />
+          </div>
+
+          <p
+            style={{
+              font: "400 14px/1.55 'Inter Tight', sans-serif",
+              color: 'var(--sub)',
+              margin: '16px 0 0',
+              textWrap: 'pretty',
+            }}
+          >
+            {detail.overview}
+          </p>
+
+          {detail.isMovie && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 16,
+                marginTop: 22,
+                flexWrap: 'wrap',
+              }}
+            >
+              <button
+                className="tl-focus"
+                onClick={detail.onToggleMovie}
+                aria-pressed={detail.movieWatched}
+                style={{
+                  font: "500 14px 'Inter Tight', sans-serif",
+                  color: detail.movieWatched ? '#0E332F' : 'var(--text)',
+                  background: detail.movieWatched ? 'var(--seafoam)' : 'transparent',
+                  border: '1px solid var(--seafoam)',
+                  borderRadius: 10,
+                  padding: '12px 18px',
+                  cursor: 'pointer',
+                  minHeight: 44,
+                }}
+              >
+                {detail.movieLabel}
+              </button>
+              <div style={{ display: 'flex', gap: 2 }} role="radiogroup" aria-label="Rating">
+                {[1, 2, 3, 4, 5].map((n) => {
+                  const filled = n <= detail.rating
+                  return (
+                    <button
+                      key={n}
+                      className="tl-focus-r6"
+                      role="radio"
+                      aria-checked={n === detail.rating}
+                      aria-label={`Rate ${n} of 5`}
+                      onClick={() => detail.onRate(n)}
+                      style={{
+                        fontSize: 22,
+                        lineHeight: 1,
+                        color: filled ? 'var(--sun)' : 'var(--drift)',
+                        background: 'none',
+                        border: 'none',
+                        padding: '8px 3px',
+                        cursor: 'pointer',
+                        minHeight: 44,
+                      }}
+                    >
+                      {filled ? '★' : '☆'}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {detail.isShow && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 22 }}>
+              {detail.seasons.map((se) => (
+                <div
+                  key={se.number}
+                  style={{
+                    border: '1px solid var(--line)',
+                    borderRadius: 12,
+                    background: 'var(--card)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px 4px 4px' }}>
+                    <button
+                      className="tl-focus-inset"
+                      onClick={se.onToggle}
+                      aria-expanded={se.open}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        gap: 10,
+                        flex: 1,
+                        minWidth: 0,
+                        background: 'none',
+                        border: 'none',
+                        padding: 12,
+                        margin: 0,
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        color: 'inherit',
+                        minHeight: 44,
+                      }}
+                    >
+                      <span
+                        style={{
+                          font: "600 14.5px 'Bricolage Grotesque', sans-serif",
+                          letterSpacing: '-0.01em',
+                        }}
+                      >
+                        {se.title}
+                      </span>
+                      <span style={{ font: "400 11px 'IBM Plex Mono', monospace", color: 'var(--drift)' }}>
+                        {se.sub}
+                      </span>
+                      <span
+                        style={{
+                          marginLeft: 'auto',
+                          font: "400 12px 'IBM Plex Mono', monospace",
+                          color: 'var(--drift)',
+                        }}
+                        aria-hidden="true"
+                      >
+                        {se.open ? '−' : '+'}
+                      </span>
+                    </button>
+                    {se.showMarkAll && (
+                      <button
+                        className="tl-focus tl-hover-line"
+                        onClick={se.onMarkAll}
+                        style={{
+                          flex: 'none',
+                          font: "400 11px 'IBM Plex Mono', monospace",
+                          color: 'var(--aqua)',
+                          background: 'none',
+                          border: '1px solid var(--line)',
+                          borderRadius: 8,
+                          padding: '8px 10px',
+                          cursor: 'pointer',
+                          minHeight: 36,
+                        }}
+                      >
+                        Mark season watched
+                      </button>
+                    )}
+                  </div>
+
+                  {se.open && (
+                    <div style={{ padding: '0 16px 8px' }}>
+                      {se.episodes.map((ep) => (
+                        <div
+                          key={ep.number}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 12,
+                            padding: '9px 0',
+                            borderTop: '1px solid var(--track)',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={ep.watched}
+                            onChange={ep.onToggle}
+                            aria-label={`Mark ${ep.code} watched`}
+                            style={{
+                              width: 19,
+                              height: 19,
+                              accentColor: 'var(--aqua)',
+                              margin: 0,
+                              flex: 'none',
+                              cursor: 'pointer',
+                            }}
+                          />
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                              <span
+                                style={{
+                                  font: "500 11px 'IBM Plex Mono', monospace",
+                                  color: 'var(--aqua)',
+                                }}
+                              >
+                                {ep.code}
+                              </span>
+                              <span
+                                style={{
+                                  font: "400 13.5px 'Inter Tight', sans-serif",
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                }}
+                              >
+                                {ep.name}
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                font: "400 10.5px 'IBM Plex Mono', monospace",
+                                color: 'var(--drift)',
+                                marginTop: 3,
+                              }}
+                            >
+                              {ep.sub}
+                            </div>
+                          </div>
+                          {!ep.watched && (
+                            <button
+                              className="tl-focus tl-hover-catch"
+                              onClick={ep.onCatchUp}
+                              title="Mark this and all previous episodes watched"
+                              style={{
+                                flex: 'none',
+                                font: "400 10.5px 'IBM Plex Mono', monospace",
+                                color: 'var(--sub)',
+                                background: 'none',
+                                border: '1px solid var(--line)',
+                                borderRadius: 8,
+                                padding: '7px 9px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Catch up
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  )
+}

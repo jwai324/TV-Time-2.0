@@ -1,0 +1,65 @@
+/* Design tokens and base rules — lifted verbatim from `Tideline App.dc.html`. */
+body {
+  --text: #0E332F;
+  --bg: #F1F5F3;
+  --card: #FDFEFE;
+  --sub: #5E6E6A;
+  --drift: #97A5A1;
+  --line: rgba(151, 165, 161, .45);
+  --track: rgba(151, 165, 161, .22);
+  --seafoam: #79D2C0;
+  --aqua: #1E9E97;
+  --sun: #F3CE8E;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter Tight', system-ui, sans-serif;
+}
+
+body[data-theme="dark"] {
+  --text: #F1F5F3;
+  --bg: #0E332F;
+  --card: #12433E;
+  --sub: #A9BBB6;
+  --line: rgba(151, 165, 161, .35);
+  --track: rgba(241, 245, 243, .14);
+}
+
+a { color: var(--aqua); }
+a:hover { color: var(--seafoam); }
+button { font-family: 'Inter Tight', system-ui, sans-serif; }
+
+@keyframes tidedrift {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+/*
+ * The design expresses interaction states with `style-focus` / `style-hover`
+ * attributes. Those become real rules here — one class per state the design
+ * asks for, so each element keeps the exact ring offset and radius it was
+ * drawn with.
+ */
+.tl-focus:focus-visible,
+.tl-focus-r6:focus-visible,
+.tl-focus-r8:focus-visible,
+.tl-focus-r10:focus-visible,
+.tl-focus-flat:focus-visible { outline: 2px solid var(--aqua); outline-offset: 2px; }
+
+.tl-focus-r6:focus-visible { border-radius: 6px; }
+.tl-focus-r8:focus-visible { border-radius: 8px; }
+.tl-focus-r10:focus-visible { border-radius: 10px; }
+.tl-focus-flat:focus-visible { outline-offset: 0; }
+
+.tl-focus-inset:focus-visible { outline: 2px solid var(--aqua); outline-offset: -2px; border-radius: 8px; }
+.tl-focus-inset1:focus-visible { outline: 2px solid var(--aqua); outline-offset: -1px; }
+.tl-focus-tab:focus-visible { outline: 2px solid var(--aqua); outline-offset: -3px; }
+
+.tl-hover-mark:hover { background: var(--aqua); color: #F1F5F3; }
+.tl-hover-pill:hover { border-color: var(--aqua); color: var(--aqua); }
+.tl-hover-line:hover { border-color: var(--aqua); }
+.tl-hover-catch:hover { color: var(--aqua); border-color: var(--aqua); }

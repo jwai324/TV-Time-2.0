@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter+Tight:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{--text:#0E332F;--bg:#F1F5F3;--card:#FDFEFE;--sub:#5E6E6A;--drift:#97A5A1;--line:rgba(151,165,161,.45);--track:rgba(151,165,161,.22);--seafoam:#79D2C0;--aqua:#1E9E97;--sun:#F3CE8E;margin:0;background:var(--bg);color:var(--text);font-family:'Inter Tight',system-ui,sans-serif}
+body[data-theme="dark"]{--text:#F1F5F3;--bg:#0E332F;--card:#12433E;--sub:#A9BBB6;--line:rgba(151,165,161,.35);--track:rgba(241,245,243,.14)}
+a{color:var(--aqua)}a:hover{color:var(--seafoam)}
+button{font-family:'Inter Tight',system-ui,sans-serif}
+@keyframes tidedrift{0%,100%{transform:translateX(0)}50%{transform:translateX(4px)}}
+@media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important}}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;justify-content:center;background:var(--bg)">
+<div style="width:100%;max-width:430px;min-height:100vh;padding:0 0 92px;box-sizing:border-box">
+
+<sc-if value="{{ loading }}" hint-placeholder-val="{{ false }}">
+  <div style="padding:80px 20px;text-align:center;font:400 12px 'IBM Plex Mono',monospace;color:var(--drift)">Loading…</div>
+</sc-if>
+
+<sc-if value="{{ storageFailed }}" hint-placeholder-val="{{ false }}">
+  <div style="margin:12px 20px 0;padding:10px 14px;border:1px solid var(--line);border-radius:12px;font:400 12px 'IBM Plex Mono',monospace;color:var(--sub)">Saving is off right now — your changes will live in memory for this session.</div>
+</sc-if>
+
+<sc-if value="{{ isUp }}" hint-placeholder-val="{{ true }}" data-screen-label="Up Next">
+  <div style="padding:28px 20px 10px">
+    <h1 style="margin:0;font:600 28px/1.1 'Bricolage Grotesque',sans-serif;letter-spacing:-0.03em">Up next</h1>
+  </div>
+  <sc-if value="{{ upEmpty }}" hint-placeholder-val="{{ false }}">
+    <div style="margin:32px 20px;padding:36px 24px;border:1px solid var(--line);border-radius:12px;text-align:center">
+      <div style="font:600 17px 'Bricolage Grotesque',sans-serif;letter-spacing:-0.02em">Nothing queued.</div>
+      <button onClick="{{ goDiscover }}" style="margin-top:14px;font:500 14px 'Inter Tight',sans-serif;color:var(--text);background:var(--seafoam);border:none;border-radius:10px;padding:12px 18px;cursor:pointer;min-height:44px" style-focus="outline:2px solid var(--aqua);outline-offset:2px">Find a show →</button>
+    </div>
+  </sc-if>
+  <div style="display:flex;flex-direction:column;gap:14px;padding:8px 20px 0">
+    <sc-for list="{{ cards }}" as="c" hint-placeholder-count="3">
+      <div style="background:{{ c.wash }};border:1px solid var(--line);border-radius:12px;overflow:hidden">
+        <div style="display:flex;gap:14px;padding:16px 16px 14px;align-items:center;min-height:78px">
+          <button onClick="{{ c.onOpen }}" style="display:flex;gap:14px;align-items:center;flex:1;min-width:0;background:none;border:none;padding:0;margin:0;text-align:left;cursor:pointer;color:inherit" style-focus="outline:2px solid var(--aqua);outline-offset:2px;border-radius:8px">
+            <div style="width:48px;height:66px;border-radius:8px;background:{{ c.posterBg }};flex:none"></div>
+            <div style="min-width:0;flex:1">
+              <div style="font:600 17px/1.2 'Bricolage Grotesque',sans-serif;letter-spacing:-0.02em">{{ c.name }}</div>
+              <div style="{{ c.infoStyle }}">
+                <sc-if value="{{ c.done }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:5px;font:400 12px 'IBM Plex Mono',monospace;color:var(--sub)">All caught up</div>
+                </sc-if>
+                <sc-if value="{{ c.notDone }}" hint-placeholder-val="{{ true }}">
+                  <div style="display:flex;align-items:baseline;gap:8px;margin-top:5px">
+                    <span style="font:500 11.5px 'IBM Plex Mono',monospace;color:var(--aqua)">{{ c.code }}</span>
+                    <span style="font:400 13.5px 'Inter Tight',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.epName }}</span>
+                  </div>
+                  <div style="font:400 11px 'IBM Plex Mono',monospace;color:var(--drift);margin-top:4px">{{ c.rt }}</div>
+                </sc-if>
+              </div>
+            </div>
+          </button>
+          <sc-if value="{{ c.notDone }}" hint-placeholder-val="{{ true }}">
+            <button onClick="{{ c.onMark }}" style="flex:none;font:500 13.5px 'Inter Tight',sans-serif;color:#0E332F;background:var(--seafoam);border:none;border-radius:10px;padding:11px 14px;cursor:pointer;min-height:44px" style-hover="background:var(--aqua);color:#F1F5F3" style-focus="outline:2px solid var(--aqua);outline-offset:2px">Mark watched</button>
+          </sc-if>
+        </div>
+        <div style="position:relative;height:5px;background:var(--track)">
+          <div style="position:absolute;top:0;bottom:0;left:0;width:{{ c.fillW }};background:var(--seafoam);transition:width .35s ease"></div>
+          <sc-if value="{{ c.notDone }}" hint-placeholder-val="{{ true }}">
+            <div style="position:absolute;left:{{ c.crestLeft }};bottom:0;width:14px;height:8px;background:var(--seafoam);border-radius:100% 100% 0 0;animation:tidedrift 4.5s ease-in-out infinite;transition:left .35s ease"></div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</sc-if>
+
+<sc-if value="{{ isLib }}" hint-placeholder-val="{{ false }}" data-screen-label="Library">
+  <div style="padding:28px 20px 10px">
+    <h1 style="margin:0;font:600 28px/1.1 'Bricolage Grotesque',sans-serif;letter-spacing:-0.03em">Library</h1>
+  </div>
+  <div style="display:flex;gap:8px;overflow-x:auto;padding:6px 20px 4px">
+    <sc-for list="{{ chips }}" as="ch" hint-placeholder-count="5">
+      <button onClick="{{ ch.on }}" style="flex:none;font:500 13px 'Inter Tight',sans-serif;padding:9px 14px;border-radius:999px;border:1px solid {{ ch.bd }};background:{{ ch.bg }};color:{{ ch.fg }};cursor:pointer;min-height:38px" style-focus="outline:2px solid var(--aqua);outline-offset:2px">{{ ch.label }}</button>
+    </sc-for>
+  </div>
+  <div style="display:flex;justify-content:flex-end;padding:8px 20px 2px">
+    <select value="{{ sortBy }}" onChange="{{ onSort }}" aria-label="Sort library" style="font:400 12px 'IBM Plex Mono',monospace;color:var(--sub);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 8px" style-focus="outline:2px solid var(--aqua)">
+      <option value="recent">recent activity</option>
+      <option value="alpha">alphabetical</option>
+      <option value="progress">progress</option>
+    </select>
+  </div>
+  <sc-if value="{{ libEmpty }}" hint-placeholder-val="{{ false }}">
+    <div style="margin:28px 20px;font:400 13px 'Inter Tight',sans-serif;color:var(--sub)">Nothing here yet. Add titles from Discover.</div>
+  </sc-if>
+  <div style="display:flex;flex-direction:column;gap:10px;padding:10px 20px 0">
+    <sc-for list="{{ libItems }}" as="it" hint-placeholder-count="5">
+      <button onClick="{{ it.onOpen }}" style="display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0;margin:0;cursor:pointer;color:inherit;overflow:hidden" style-focus="outline:2px solid var(--aqua);outline-offset:2px">
+        <div style="display:flex;gap:12px;align-items:center;padding:12px 14px">
+          <div style="width:38px;height:52px;border-radius:6px;background:{{ it.posterBg }};flex:none"></div>
+          <div style="min-width:0;flex:1">
+            <div style="font:600 15px/1.2 'Bricolage Grotesque',sans-serif;letter-spacing:-0.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ it.name }}</div>
+            <div style="font:400 11px 'IBM Plex Mono',monospace;color:var(--drift);margin-top:4px">{{ it.meta }}</div>
+          </div>
+        </div>
+        <div style="position:relative;height:4px;background:var(--track)">
+          <div style="position:absolute;top:0;bottom:0;left:0;width:{{ it.fillW }};background:var(--seafoam)"></div>
+          <sc-if value="{{ it.crest }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute;left:{{ it.crestLeft }};bottom:0;width:12px;height:7px;background:var(--seafoam);border-radius:100% 100% 0 0;animation:tidedrift 5s ease-in-out infinite"></div>
+          </sc-if>
+        </div>
+      </button>
+    </sc-for>
+  </div>
+</sc-if>
+
+<sc-if value="{{ isTitle }}" hint-placeholder-val="{{ false }}" data-screen-label="Title detail">
+  <div style="padding:16px 20px 0">
+    <button onClick="{{ goBack }}" style="font:500 14px 'Inter Tight',sans-serif;color:var(--aqua);background:none;border:none;padding:10px 0;cursor:pointer;min-height:44px" style-focus="outline:2px solid var(--aqua);outline-offset:2px;border-radius:6px">← Back</button>
+  </div>
+  <sc-if value="{{ hasDetail }}" hint-placeholder-val="{{ false }}">
+    <div style="padding:6px 20px 0">
+      <div style="display:flex;gap:16px;align-items:flex-start">
+        <div style="width:96px;height:134px;border-radius:10px;background:{{ d.posterBg }};flex:none"></div>
+        <div style="min-width:0;flex:1">
+          <h1 style="margin:0;font:600 24px/1.1 'Bricolage Grotesque',sans-serif;letter-spacing:-0.03em">{{ d.name }}</h1>
+          <div style="font:400 11.5px 'IBM Plex Mono',monospace;color:var(--drift);margin-top:8px">{{ d.meta }}</div>
+          <sc-if value="{{ d.isShow }}" hint-placeholder-val="{{ true }}">
+            <div style="font:400 12px 'IBM Plex Mono',monospace;color:var(--sub);margin-top:14px">{{ d.progressLine }}</div>
+          </sc-if>
+          <button onClick="{{ d.onWL }}" style="margin-top:10px;font:500 12.5px 'Inter Tight',sans-serif;color:var(--sub);background:none;border:1px solid var(--line);border-radius:999px;padding:8px 13px;cursor:pointer" style-hover="border-color:var(--aqua);color:var(--aqua)" style-focus="outline:2px solid var(--aqua);outline-offset:2px">{{ d.wlLabel }}</button>
+        </div>
+      </div>
+      <div style="position:relative;height:5px;background:var(--track);border-radius:3px;margin-top:18px">
+        <div style="position:absolute;top:0;bottom:0;left:0;width:{{ d.fillW }};background:var(--seafoam);border-radius:3px;transition:width .35s ease"></div>
+        <sc-if value="{{ d.crest }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;left:{{ d.crestLeft }};bottom:0;width:14px;height:8px;background:var(--seafoam);border-radius:100% 100% 0 0;animation:tidedrift 4.5s ease-in-out infinite;transition:left .35s ease"></div>
+        </sc-if>
+      </div>
+      <p style="font:400 14px/1.55 'Inter Tight',sans-serif;color:var(--sub);margin:16px 0 0;text-wrap:pretty">{{ d.overview }}</p>
+
+      <sc-if value="{{ d.isMovie }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:16px;margin-top:22px;flex-wrap:wrap">
+          <button onClick="{{ d.onToggleMovie }}" style="font:500 14px 'Inter Tight',sans-serif;color:{{ d.mvFg }};background:{{ d.mvBg }};border:1px solid var(--seafoam);border-radius:10px;padding:12px 18px;cursor:pointer;min-height:44px" style-focus="outline:2px solid var(--aqua);outline-offset:2px">{{ d.mvLabel }}</button>
+          <div style="display:flex;gap:2px" role="radiogroup" aria-label="Rating">
+            <sc-for list="{{ d.stars }}" as="st" hint-placeholder-count="5">
+              <button onClick="{{ st.on }}" aria-label="{{ st.aria }}" style="font-size:22px;line-height:1;color:{{ st.color }};background:none;border:none;padding:8px 3px;cursor:pointer;min-height:44px" style-focus="outline:2px solid var(--aqua);outline-offset:2px;border-radius:6px">{{ st.sym }}</button>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ d.isShow }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:22px">
+          <sc-for list="{{ d.seasons }}" as="se" hint-placeholder-count="2">
+            <div style="border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden">
+              <div style="display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px">
+                <button onClick="{{ se.onToggle }}" aria-expanded="{{ se.open }}" style="display:flex;align-items:baseline;gap:10px;flex:1;min-width:0;background:none;border:none;padding:12px;margin:0;text-align:left;cursor:pointer;color:inherit;min-height:44px" style-focus="outline:2px solid var(--aqua);outline-offset:-2px;border-radius:8px">
+                  <span style="font:600 14.5px 'Bricolage Grotesque',sans-serif;letter-spacing:-0.01em">{{ se.title }}</span>
+                  <span style="font:400 11px 'IBM Plex Mono',monospace;color:var(--drift)">{{ se.sub }}</span>
+                  <span style="margin-left:auto;font:400 12px 'IBM Plex Mono',monospace;color:var(--drift)">{{ se.chev }}</span>
+                </button>
+                <sc-if value="{{ se.showMark }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ se.onMarkAll }}" style="flex:none;font:400 11px 'IBM Plex Mono',monospace;color:var(--aqua);background:none;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;min-height:36px" style-hover="border-color:var(--aqua)" style-focus="outline:2px solid var(--aqua);outline-offset:2px">Mark season watched</button>
+                </sc-if>
+              </div>
+              <sc-if value="{{ se.open }}" hint-placeholder-val="{{ false }}">
+                <div style="padding:0 16px 8px">
+                  <sc-for list="{{ se.eps }}" as="ep" hint-placeholder-count="4">
+                    <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--track)">
+                      <input type="checkbox" checked="{{ ep.watched }}" onChange="{{ ep.onToggle }}" aria-label="{{ ep.aria }}" style="width:19px;height:19px;accent-color:var(--aqua);margin:0;flex:none;cursor:pointer">
+                      <div style="min-width:0;flex:1">
+                        <div style="display:flex;align-items:baseline;gap:8px">
+                          <span style="font:500 11px 'IBM Plex Mono',monospace;color:var(--aqua)">{{ ep.code }}</span>
+                          <span style="font:400 13.5px 'Inter Tight',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ ep.name }}</span>
+                        </div>
+                        <div style="font:400 10.5px 'IBM Plex Mono',monospace;color:var(--drift);margin-top:3px">{{ ep.sub }}</div>
+                      </div>
+                      <sc-if value="{{ ep.showCatch }}" hint-placeholder-val="{{ false }}">
+                        <button onClick="{{ ep.onCatchUp }}" title="Mark this and all previous episodes watched" style="flex:none;font:400 10.5px 'IBM Plex Mono',monospace;color:var(--sub);background:none;border:1px solid var(--line);border-radius:8px;padding:7px 9px;cursor:pointer" style-hover="color:var(--aqua);border-color:var(--aqua)" style-focus="outline:2px solid var(--aqua);outline-offset:2px">Catch up</button>
+                      </sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+  </sc-if>
+</sc-if>
+
+<sc-if value="{{ isDisc }}" hint-placeholder-val="{{ false }}" data-screen-label="Discover">
+  <div style="padding:28px 20px 10px">
+    <h1 style="margin:0;font:600 28px/1.1 'Bricolage Grotesque',sans-serif;letter-spacing:-0.03em">Discover</h1>
+  </div>
+  <div style="padding:6px 20px 0">
+    <input value="{{ query }}" onChange="{{ onSearch }}" type="search" placeholder="Search shows and movies" aria-label="Search titles" style="width:100%;box-sizing:border-box;font:400 16px 'Inter Tight',sans-serif;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 16px" style-focus="outline:2px solid var(--aqua);outline-offset:-1px">
+  </div>
+  <sc-if value="{{ showResults }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;flex-direction:column;gap:10px;padding:16px 20px 0">
+      <sc-for list="{{ results }}" as="r" hint-placeholder-count="3">
+        <div style="display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px">
+          <button onClick="{{ r.onOpen }}" style="display:flex;gap:12px;align-items:center;flex:1;min-width:0;background:none;border:none;padding:0;margin:0;text-align:left;cursor:pointer;color:inherit" style-focus="outline:2px solid var(--aqua);outline-offset:2px;border-radius:8px">
+            <div style="width:38px;height:52px;border-radius:6px;background:{{ r.posterBg }};flex:none"></div>
+            <div style="min-width:0">
+              <div style="font:600 15px/1.2 'Bricolage Grotesque',sans-serif;letter-spacing:-0.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.name }}</div>
+              <div style="font:400 11px 'IBM Plex Mono',monospace;color:var(--drift);margin-top:4px">{{ r.meta }}</div>
+            </div>
+          </button>
+          <button onClick="{{ r.onWL }}" style="flex:none;font:500 12.5px 'Inter Tight',sans-serif;color:{{ r.wlFg }};background:{{ r.wlBg }};border:1px solid var(--line);border-radius:999px;padding:9px 13px;cursor:pointer;min-height:38px" style-focus="outline:2px solid var(--aqua);outline-offset:2px">{{ r.wlLabel }}</button>
+        </div>
+      </sc-for>
+    </div>
+    <sc-if value="{{ noResults }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:24px 20px;font:400 13px 'Inter Tight',sans-serif;color:var(--sub)">No matches. Try another word — titles and genres both work.</div>
+    </sc-if>
+  </sc-if>
+  <sc-if value="{{ showTrending }}" hint-placeholder-val="{{ true }}">
+    <div style="padding:24px 20px 8px;font:400 11px 'IBM Plex Mono',monospace;color:var(--drift);text-transform:uppercase;letter-spacing:.08em">Trending this week</div>
+    <div style="display:flex;gap:12px;overflow-x:auto;padding:0 20px 8px">
+      <sc-for list="{{ trending }}" as="tr" hint-placeholder-count="4">
+        <div style="flex:none;width:118px">
+          <button onClick="{{ tr.onOpen }}" style="display:block;width:100%;background:none;border:none;padding:0;margin:0;text-align:left;cursor:pointer;color:inherit" style-focus="outline:2px solid var(--aqua);outline-offset:2px;border-radius:10px">
+            <div style="width:118px;height:164px;border-radius:10px;background:{{ tr.posterBg }}"></div>
+            <div style="font:600 13px/1.25 'Bricolage Grotesque',sans-serif;letter-spacing:-0.01em;margin-top:8px">{{ tr.name }}</div>
+            <div style="font:400 10.5px 'IBM Plex Mono',monospace;color:var(--drift);margin-top:3px">{{ tr.meta }}</div>
+          </button>
+          <button onClick="{{ tr.onWL }}" style="margin-top:7px;font:500 12px 'Inter Tight',sans-serif;color:{{ tr.wlFg }};background:{{ tr.wlBg }};border:1px solid var(--line);border-radius:999px;padding:7px 11px;cursor:pointer;min-height:34px" style-focus="outline:2px solid var(--aqua);outline-offset:2px">{{ tr.wlLabel }}</button>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+</sc-if>
+
+<sc-if value="{{ isStats }}" hint-placeholder-val="{{ false }}" data-screen-label="Stats">
+  <div style="padding:28px 20px 10px">
+    <h1 style="margin:0;font:600 28px/1.1 'Bricolage Grotesque',sans-serif;letter-spacing:-0.03em">Stats</h1>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 20px 0">
+    <sc-for list="{{ stats }}" as="s" hint-placeholder-count="4">
+      <div style="background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px">
+        <div style="font:600 26px/1 'Bricolage Grotesque',sans-serif;letter-spacing:-0.02em;color:{{ s.color }}">{{ s.value }}</div>
+        <div style="font:400 10.5px 'IBM Plex Mono',monospace;color:var(--drift);margin-top:8px">{{ s.label }}</div>
+      </div>
+    </sc-for>
+  </div>
+  <div style="padding:26px 20px 8px;font:400 11px 'IBM Plex Mono',monospace;color:var(--drift);text-transform:uppercase;letter-spacing:.08em">Top genres</div>
+  <div style="display:flex;flex-direction:column;gap:14px;padding:0 20px">
+    <sc-for list="{{ topGenres }}" as="g" hint-placeholder-count="4">
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font:500 13.5px 'Inter Tight',sans-serif">{{ g.name }}</span>
+          <span style="font:400 11px 'IBM Plex Mono',monospace;color:var(--drift)">{{ g.count }}</span>
+        </div>
+        <div style="position:relative;height:4px;background:var(--track);border-radius:2px;margin-top:6px">
+          <div style="position:absolute;top:0;bottom:0;left:0;width:{{ g.w }};background:var(--seafoam);border-radius:2px"></div>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</sc-if>
+
+</div>
+</div>
+<nav aria-label="Main" style="position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:var(--card);border-top:1px solid var(--line);display:flex;box-sizing:border-box">
+  <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+    <button onClick="{{ t.on }}" aria-current="{{ t.cur }}" style="flex:1;min-height:60px;background:none;border:none;border-top:2px solid {{ t.bar }};color:{{ t.fg }};font:{{ t.wt }} 12.5px 'Inter Tight',sans-serif;cursor:pointer;padding:0" style-focus="outline:2px solid var(--aqua);outline-offset:-3px">{{ t.label }}</button>
+  </sc-for>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;darkMode&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;freshStart&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Data&quot;}}">
+class Component extends DCLogic {
+  state = { screen:'upnext', tab:'upnext', titleId:null, titles:{}, loaded:false, user:null,
+    storageFailed:false, filter:'All', sortBy:'recent', query:'', results:[], searched:false,
+    trending:[], openSeasons:{}, anim:{}, finishedNow:{} };
+  KEY = 'tideline.user.v1';
+
+  async componentDidMount() {
+    const mod = await import(new URL('src/data/catalog.js', location.href).href);
+    this.cat = mod;
+    let user = null, failed = false;
+    if (!this.props.freshStart) {
+      try {
+        const raw = localStorage.getItem(this.KEY);
+        if (raw) { const p = JSON.parse(raw);
+          user = { watchedEpisodes:new Set(p.watchedEpisodes||[]), watchedMovies:new Set(p.watchedMovies||[]),
+            watchlist:p.watchlist||[], ratings:p.ratings||{}, lastActivity:p.lastActivity||[] }; }
+      } catch(e) { failed = true; }
+    }
+    if (!user) user = this.props.freshStart
+      ? { watchedEpisodes:new Set(), watchedMovies:new Set(), watchlist:[], ratings:{}, lastActivity:[] }
+      : this.seed();
+    const ids = new Set(user.watchlist);
+    user.watchedEpisodes.forEach(k => ids.add(k.split(':')[0]));
+    user.watchedMovies.forEach(id => ids.add(id));
+    Object.keys(user.ratings).forEach(id => ids.add(id));
+    user.lastActivity.forEach(a => ids.add(a.titleId));
+    const titles = {};
+    await Promise.all([...ids].map(async id => { const t = await mod.getTitle(id); if (t) titles[id] = t; }));
+    const trending = await mod.getTrending();
+    trending.forEach(t => { titles[t.id] = titles[t.id] || t; });
+    this.setState({ user, titles, trending, loaded:true, storageFailed:failed });
+    this.persist(user);
+  }
+
+  seed() {
+    const now = Date.now(), day = 86400000, w = new Set();
+    const add = (id, s, from, to) => { for (let e = from; e <= to; e++) w.add(id+':'+s+':'+e); };
+    add('severance-point',1,1,9); add('severance-point',2,1,10); add('severance-point',3,1,6);
+    add('harbor-lights',1,1,3); add('saltgrass',1,1,10); add('saltgrass',2,1,4);
+    add('meridian',1,1,9); add('the-quiet-divide',1,1,10); add('the-quiet-divide',2,1,10);
+    add('undertow',1,1,2);
+    return {
+      watchedEpisodes: w,
+      watchedMovies: new Set(['the-salt-path','aurora-motel','petrichor','girder','the-foley-artist']),
+      watchlist: ['open-water','the-ledger','late-frost','half-moon-bay','vantage'],
+      ratings: { 'the-salt-path':4, 'aurora-motel':3, 'petrichor':5, 'girder':4, 'the-foley-artist':3, 'the-quiet-divide':5 },
+      lastActivity: [
+        { ts: now-2*3600e3, titleId:'severance-point', label:'S03E06' },
+        { ts: now-day, titleId:'harbor-lights', label:'S01E03' },
+        { ts: now-2*day, titleId:'saltgrass', label:'S02E04' },
+        { ts: now-3*day, titleId:'meridian', label:'S01E09' },
+        { ts: now-5*day, titleId:'undertow', label:'S01E02' },
+        { ts: now-6*day, titleId:'petrichor', label:'Watched' },
+        { ts: now-8*day, titleId:'the-quiet-divide', label:'S02E10' }
+      ]
+    };
+  }
+
+  persist(user) {
+    if (this.props.freshStart) return;
+    try {
+      localStorage.setItem(this.KEY, JSON.stringify({
+        watchedEpisodes:[...user.watchedEpisodes], watchedMovies:[...user.watchedMovies],
+        watchlist:user.watchlist, ratings:user.ratings, lastActivity:user.lastActivity }));
+    } catch(e) { if (!this.state.storageFailed) this.setState({ storageFailed:true }); }
+  }
+  mut(fn) {
+    const u = this.state.user;
+    const user = { watchedEpisodes:new Set(u.watchedEpisodes), watchedMovies:new Set(u.watchedMovies),
+      watchlist:[...u.watchlist], ratings:{...u.ratings}, lastActivity:[...u.lastActivity] };
+    fn(user); this.setState({ user }); this.persist(user);
+  }
+  act(user, titleId, label) {
+    user.lastActivity.unshift({ ts:Date.now(), titleId, label });
+    user.lastActivity = user.lastActivity.slice(0, 200);
+  }
+  code(s, e) { const p = n => String(n).padStart(2,'0'); return 'S'+p(s)+'E'+p(e); }
+  nextUn(t) {
+    const w = this.state.user.watchedEpisodes;
+    for (const s of t.seasons) for (const ep of s.episodes)
+      if (!w.has(t.id+':'+s.number+':'+ep.number)) return { s:s.number, e:ep.number, ep };
+    return null;
+  }
+  counts(t) {
+    let tot = 0, w = 0; const ws = this.state.user.watchedEpisodes;
+    for (const s of t.seasons) for (const ep of s.episodes) { tot++; if (ws.has(t.id+':'+s.number+':'+ep.number)) w++; }
+    return { tot, w };
+  }
+  pctOf(t) {
+    if (t.type === 'movie') return this.state.user.watchedMovies.has(t.id) ? 100 : 0;
+    const { tot, w } = this.counts(t); return tot ? Math.round(w/tot*100) : 0;
+  }
+  lastTs(id) { const a = this.state.user.lastActivity.find(x => x.titleId === id); return a ? a.ts : 0; }
+  sw(t) { return 'hsl('+t.posterHue+',30%,'+(this.props.darkMode?'32%':'40%')+')'; }
+  posterBg(t) { return t.posterUrl ? 'url('+t.posterUrl+') center/cover no-repeat, '+this.sw(t) : this.sw(t); }
+  wash(t) { return 'linear-gradient(0deg,hsla('+t.posterHue+',35%,45%,.10),hsla('+t.posterHue+',35%,45%,.10)),var(--card)'; }
+  setAnim(id, v) { this.setState(s => ({ anim:{ ...s.anim, [id]:v } })); }
+
+  markNext(id) {
+    if (this.state.anim[id]) return;
+    const t = this.state.titles[id]; const nx = this.nextUn(t); if (!nx) return;
+    this.setAnim(id, 'out');
+    setTimeout(() => {
+      this.mut(u => { u.watchedEpisodes.add(id+':'+nx.s+':'+nx.e); this.act(u, id, this.code(nx.s, nx.e)); });
+      if (!this.nextUn(this.state.titles[id])) this.setState(s => ({ finishedNow:{ ...s.finishedNow, [id]:true } }));
+      this.setAnim(id, 'in');
+      setTimeout(() => this.setAnim(id, null), 40);
+    }, 190);
+  }
+  toggleEp(id, s, e) {
+    const key = id+':'+s+':'+e;
+    this.mut(u => {
+      if (u.watchedEpisodes.has(key)) u.watchedEpisodes.delete(key);
+      else { u.watchedEpisodes.add(key); this.act(u, id, this.code(s, e)); }
+    });
+  }
+  markSeason(id, sn) {
+    const t = this.state.titles[id]; const se = t.seasons.find(x => x.number === sn);
+    this.mut(u => { se.episodes.forEach(ep => u.watchedEpisodes.add(id+':'+sn+':'+ep.number));
+      this.act(u, id, 'Season '+sn+' watched'); });
+  }
+  catchUp(id, sn, en) {
+    const t = this.state.titles[id];
+    this.mut(u => {
+      for (const s of t.seasons) { if (s.number > sn) break;
+        for (const ep of s.episodes) { if (s.number === sn && ep.number > en) break;
+          u.watchedEpisodes.add(id+':'+s.number+':'+ep.number); } }
+      this.act(u, id, 'Caught up to '+this.code(sn, en));
+    });
+  }
+  toggleMovie(id) {
+    this.mut(u => {
+      if (u.watchedMovies.has(id)) u.watchedMovies.delete(id);
+      else { u.watchedMovies.add(id); this.act(u, id, 'Watched'); }
+    });
+  }
+  rate(id, n) { this.mut(u => { if (u.ratings[id] === n) delete u.ratings[id]; else u.ratings[id] = n; }); }
+  toggleWL(id) {
+    this.mut(u => {
+      const i = u.watchlist.indexOf(id);
+      if (i >= 0) u.watchlist.splice(i, 1); else u.watchlist.push(id);
+    });
+  }
+  openTitle(id) {
+    if (!this.state.titles[id]) this.cat.getTitle(id).then(t => { if (t) this.setState(s => ({ titles:{ ...s.titles, [id]:t } })); });
+    this.setState({ screen:'title', titleId:id });
+  }
+  trackedIds() {
+    const u = this.state.user, ids = new Set(u.watchlist);
+    u.watchedEpisodes.forEach(k => ids.add(k.split(':')[0]));
+    u.watchedMovies.forEach(id => ids.add(id));
+    Object.keys(u.ratings).forEach(id => ids.add(id));
+    return [...ids];
+  }
+
+  renderVals() {
+    const st = this.state;
+    if (typeof document !== 'undefined') document.body.dataset.theme = this.props.darkMode ? 'dark' : 'light';
+    if (!st.loaded) return { loading:true, isUp:false, isLib:false, isTitle:false, isDisc:false, isStats:false,
+      storageFailed:false, upEmpty:false, libEmpty:false, hasDetail:false, showResults:false, showTrending:false,
+      noResults:false, cards:[], chips:[], libItems:[], results:[], trending:[], stats:[], topGenres:[], tabs:[],
+      query:'', sortBy:'recent', d:{}, goDiscover:null, goBack:null, onSort:null, onSearch:null };
+    const T = st.titles, u = st.user;
+    const go = (tab) => () => this.setState({ screen:tab, tab, titleId:null });
+
+    // Up Next
+    const inProg = Object.values(T).filter(t => t.type === 'show' && this.counts(t).w > 0 && (this.pctOf(t) < 100 || st.finishedNow[t.id]));
+    if (!this._upOrder) this._upOrder = inProg.slice().sort((a,b) => this.lastTs(b.id) - this.lastTs(a.id)).map(t => t.id);
+    inProg.forEach(t => { if (!this._upOrder.includes(t.id)) this._upOrder.push(t.id); });
+    const cards = this._upOrder.filter(id => inProg.some(t => t.id === id)).map(id => {
+      const t = T[id], nx = this.nextUn(t), pct = this.pctOf(t), a = st.anim[id];
+      const infoStyle = a === 'out' ? { opacity:0, transform:'translateY(-6px)', transition:'opacity .18s ease, transform .18s ease' }
+        : a === 'in' ? { opacity:0, transform:'translateY(6px)', transition:'none' }
+        : { opacity:1, transform:'none', transition:'opacity .22s ease, transform .22s ease' };
+      return { id, name:t.name, done:!nx, notDone:!!nx,
+        code: nx ? this.code(nx.s, nx.e) : '', epName: nx ? nx.ep.name : '', rt: nx ? nx.ep.runtimeMinutes+' min' : '',
+        fillW: pct+'%', crestLeft: 'calc('+pct+'% - 7px)', posterBg: this.posterBg(t), wash: this.wash(t),
+        infoStyle, onMark: () => this.markNext(id), onOpen: () => this.openTitle(id) };
+    });
+
+    // Library
+    const tracked = this.trackedIds().map(id => T[id]).filter(Boolean);
+    const filt = st.filter === 'Shows' ? tracked.filter(t => t.type === 'show')
+      : st.filter === 'Movies' ? tracked.filter(t => t.type === 'movie')
+      : st.filter === 'Watchlist' ? tracked.filter(t => u.watchlist.includes(t.id))
+      : st.filter === 'Finished' ? tracked.filter(t => this.pctOf(t) === 100)
+      : tracked;
+    const sorted = filt.slice().sort((a,b) =>
+      st.sortBy === 'alpha' ? a.name.localeCompare(b.name)
+      : st.sortBy === 'progress' ? this.pctOf(b) - this.pctOf(a)
+      : this.lastTs(b.id) - this.lastTs(a.id) || a.name.localeCompare(b.name));
+    const libItems = sorted.map(t => {
+      const pct = this.pctOf(t);
+      const meta = t.type === 'show'
+        ? t.year+' · '+this.counts(t).w+' of '+this.counts(t).tot+' · '+pct+'%'
+        : t.year+' · film · '+t.runtimeMinutes+' min'+(u.watchedMovies.has(t.id) ? ' · watched' : '');
+      return { id:t.id, name:t.name, meta, fillW:pct+'%', crest: pct > 0 && pct < 100,
+        crestLeft:'calc('+pct+'% - 6px)', posterBg:this.posterBg(t), onOpen: () => this.openTitle(t.id) };
+    });
+    const chips = ['All','Shows','Movies','Watchlist','Finished'].map(label => {
+      const active = st.filter === label;
+      return { label, on: () => this.setState({ filter:label }),
+        bg: active ? 'var(--text)' : 'var(--card)', fg: active ? 'var(--bg)' : 'var(--sub)',
+        bd: active ? 'var(--text)' : 'var(--line)' };
+    });
+
+    // Detail
+    const dt = st.titleId ? T[st.titleId] : null;
+    let d = {};
+    if (dt) {
+      const pct = this.pctOf(dt), isShow = dt.type === 'show', nx = isShow ? this.nextUn(dt) : null;
+      const c = isShow ? this.counts(dt) : null;
+      const inWL = u.watchlist.includes(dt.id), r = u.ratings[dt.id] || 0;
+      d = { name:dt.name, isShow, isMovie:!isShow, posterBg:this.posterBg(dt),
+        meta: dt.year+' · '+dt.genres.join(' · ')+(isShow ? ' · '+(dt.status === 'returning' ? 'returning' : 'ended') : ''),
+        overview: dt.overview,
+        progressLine: c ? c.w+' of '+c.tot+' episodes · '+pct+'%' : '',
+        fillW: pct+'%', crest: pct > 0 && pct < 100, crestLeft:'calc('+pct+'% - 7px)',
+        onWL: () => this.toggleWL(dt.id), wlLabel: inWL ? 'On watchlist — remove' : 'Add to watchlist',
+        mvLabel: u.watchedMovies.has(dt.id) ? 'Watched — undo' : 'Mark watched',
+        mvBg: u.watchedMovies.has(dt.id) ? 'var(--seafoam)' : 'transparent',
+        mvFg: u.watchedMovies.has(dt.id) ? '#0E332F' : 'var(--text)',
+        onToggleMovie: () => this.toggleMovie(dt.id),
+        stars: [1,2,3,4,5].map(n => ({ sym: n <= r ? '★' : '☆', color: n <= r ? 'var(--sun)' : 'var(--drift)',
+          aria:'Rate '+n+' of 5', on: () => this.rate(dt.id, n) })),
+        seasons: isShow ? dt.seasons.map(se => {
+          const sk = dt.id+':'+se.number;
+          const open = st.openSeasons[sk] !== undefined ? st.openSeasons[sk] : (nx ? nx.s === se.number : false);
+          const wc = se.episodes.filter(ep => u.watchedEpisodes.has(dt.id+':'+se.number+':'+ep.number)).length;
+          return { title:'Season '+se.number, sub: wc+' of '+se.episodes.length, open, chev: open ? '−' : '+',
+            showMark: wc < se.episodes.length,
+            onToggle: () => this.setState(s => ({ openSeasons:{ ...s.openSeasons, [sk]:!open } })),
+            onMarkAll: () => this.markSeason(dt.id, se.number),
+            eps: open ? se.episodes.map(ep => {
+              const watched = u.watchedEpisodes.has(dt.id+':'+se.number+':'+ep.number);
+              return { code:this.code(se.number, ep.number), name:ep.name,
+                sub: ep.runtimeMinutes+' min · '+ep.airDate, watched, showCatch:!watched,
+                aria:'Mark '+this.code(se.number, ep.number)+' watched',
+                onToggle: () => this.toggleEp(dt.id, se.number, ep.number),
+                onCatchUp: () => this.catchUp(dt.id, se.number, ep.number) };
+            }) : [] };
+        }) : [] };
+    }
+
+    // Discover
+    const wlBtn = (t) => {
+      const inWL = u.watchlist.includes(t.id);
+      return { wlLabel: inWL ? 'Added' : 'Watchlist', wlBg: inWL ? 'var(--seafoam)' : 'transparent',
+        wlFg: inWL ? '#0E332F' : 'var(--sub)', onWL: () => this.toggleWL(t.id) };
+    };
+    const results = st.results.map(t => ({ id:t.id, name:t.name, posterBg:this.posterBg(t),
+      meta: t.year+' · '+(t.type === 'show' ? 'show' : 'film')+' · '+t.genres[0],
+      onOpen: () => this.openTitle(t.id), ...wlBtn(t) }));
+    const trending = st.trending.map(t => ({ id:t.id, name:t.name, posterBg:this.posterBg(t),
+      meta: t.year+' · '+(t.type === 'show' ? 'show' : 'film'),
+      onOpen: () => this.openTitle(t.id), ...wlBtn(t) }));
+
+    // Stats
+    let mins = 0;
+    u.watchedEpisodes.forEach(k => { const [id] = k.split(':'); const t = T[id]; if (t) mins += t.runtimeMinutes; });
+    u.watchedMovies.forEach(id => { const t = T[id]; if (t) mins += t.runtimeMinutes; });
+    const nowD = new Date();
+    const epsMonth = u.lastActivity.filter(a => { const dte = new Date(a.ts);
+      return /^S\d{2}E\d{2}$/.test(a.label) && dte.getMonth() === nowD.getMonth() && dte.getFullYear() === nowD.getFullYear(); }).length;
+    const days = new Set(u.lastActivity.map(a => new Date(a.ts).toDateString()));
+    let streak = 0; const cur = new Date();
+    if (!days.has(cur.toDateString())) cur.setDate(cur.getDate() - 1);
+    while (days.has(cur.toDateString())) { streak++; cur.setDate(cur.getDate() - 1); }
+    const gTally = {};
+    tracked.forEach(t => {
+      const watched = t.type === 'movie' ? u.watchedMovies.has(t.id) : this.counts(t).w > 0;
+      if (watched) t.genres.forEach(g => { gTally[g] = (gTally[g] || 0) + 1; });
+    });
+    const gSorted = Object.entries(gTally).sort((a,b) => b[1] - a[1]).slice(0, 4);
+    const gMax = gSorted.length ? gSorted[0][1] : 1;
+    const topGenres = gSorted.map(([name, count]) => ({ name, count:String(count), w: Math.round(count/gMax*100)+'%' }));
+    const stats = [
+      { value: Math.round(mins/60)+' h', label:'total watched', color:'var(--text)' },
+      { value: String(epsMonth), label:'episodes this month', color:'var(--text)' },
+      { value: streak+(streak === 1 ? ' day' : ' days'), label:'current streak', color:'var(--sun)' },
+      { value: String(tracked.length), label:'titles tracked', color:'var(--text)' }
+    ];
+
+    const tabs = [['upnext','Up Next'],['library','Library'],['discover','Discover'],['stats','Stats']].map(([key,label]) => {
+      const active = st.tab === key;
+      return { label, on: go(key), cur: active ? 'page' : 'false',
+        fg: active ? 'var(--aqua)' : 'var(--sub)', bar: active ? 'var(--seafoam)' : 'transparent', wt: active ? '600' : '500' };
+    });
+
+    return { loading:false, storageFailed:st.storageFailed,
+      isUp: st.screen === 'upnext', isLib: st.screen === 'library', isTitle: st.screen === 'title',
+      isDisc: st.screen === 'discover', isStats: st.screen === 'stats',
+      upEmpty: cards.length === 0, cards, goDiscover: go('discover'),
+      chips, sortBy: st.sortBy, onSort: (ev) => this.setState({ sortBy: ev.target.value }),
+      libItems, libEmpty: libItems.length === 0,
+      hasDetail: !!dt, d, goBack: () => this.setState({ screen: st.tab, titleId:null }),
+      query: st.query, onSearch: (ev) => {
+        const q = ev.target.value; this.setState({ query:q });
+        if (!q.trim()) { this.setState({ results:[], searched:false }); return; }
+        this.cat.searchTitles(q).then(rs => { if (this.state.query === q) {
+          const titles = { ...this.state.titles }; rs.forEach(t => { titles[t.id] = titles[t.id] || t; });
+          this.setState({ results:rs, searched:true, titles }); } });
+      },
+      showResults: st.searched && st.query.trim().length > 0,
+      noResults: st.searched && st.results.length === 0,
+      showTrending: !st.query.trim(), results, trending,
+      stats, topGenres, tabs };
+  }
+}
+</script>
+</body>
+</html>
