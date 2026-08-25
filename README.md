@@ -21,7 +21,7 @@ npm run preview  # serve the built bundle
 | **Up Next** | Every show you are mid-way through, most recent activity first, each with its next unwatched episode, a one-tap **Mark watched**, and an **Undo** that steps back one episode. |
 | **Library** | Everything you track, filtered by All / Shows / Movies / Watchlist / Finished and sorted by recent activity (ties broken by the most hours left to watch), title, or progress. |
 | **Title detail** | Poster, synopsis and progress. Shows get season accordions with per-episode checkboxes, **Catch up**, and **Mark season watched**; films get a watched toggle and a five-star rating. |
-| **Discover** | Search across titles and genres, plus a trending row. Watchlist pills throughout. |
+| **Discover** | TMDB search plus this week's trending row. Watchlist pills throughout. |
 | **Stats** | Hours watched, episodes this month, current streak, titles tracked, and a top-genres chart. |
 
 ## How the code maps to the design
@@ -70,14 +70,24 @@ reproduced as-is:
 
 ## Data
 
-`src/data/catalog.js` is an in-memory table of fictional titles behind three
-async functions — `getTitle`, `getTrending`, `searchTitles`. Nothing else
-touches it, so swapping in a real API is a change to that one file.
-[docs/wiring-up-tmdb.md](./docs/wiring-up-tmdb.md) is a step-by-step guide to
-doing exactly that with TMDB.
+Titles come from [TMDB](https://www.themoviedb.org/), behind the same three
+async functions the app has always used — `getTitle`, `getTrending`,
+`searchTitles` in `src/data/catalog.js`. Requests go through the `tmdb`
+Supabase Edge Function (`supabase/functions/tmdb/index.ts`), which attaches
+the secret TMDB read token server-side and allows only read-only catalog
+paths, so no credential ships in the bundle. The function needs a
+`TMDB_TOKEN` secret set in the Supabase dashboard.
 
-A first run seeds a lived-in library (six shows in progress, five films
-watched, five on the watchlist) so every screen has something to show.
+Ids carry the media type (`tv-1396`, `movie-603`) because TMDB's movie and TV
+id spaces overlap. Two mapping decisions to know about: season 0 ("Specials")
+is dropped, and unaired episodes are excluded — otherwise a current show could
+never reach 100% and "next up" would point at an episode that doesn't exist
+yet. Search and trending return light summaries; the full record (seasons,
+genres, runtimes) is fetched when a title is opened or watchlisted.
+
+A first run starts empty — find something real on Discover.
+[docs/wiring-up-tmdb.md](./docs/wiring-up-tmdb.md) documents the whole
+integration.
 
 ## State, storage and sync
 

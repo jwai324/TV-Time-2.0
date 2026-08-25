@@ -5,7 +5,9 @@
  * as arrays and rehydrated on the way back in.
  */
 
-export const STORAGE_KEY = 'tideline.user.v1'
+// v2: the v1 records referenced the fictional demo catalog's ids, which no
+// longer resolve now that titles come from TMDB.
+export const STORAGE_KEY = 'tideline.user.v2'
 
 /** Every episode is addressed by `titleId:season:episode`. */
 export const episodeKey = (titleId, season, episode) => `${titleId}:${season}:${episode}`
@@ -35,50 +37,6 @@ export const emptyUser = () => ({
   lastActivity: [],
 })
 
-/** A lived-in starting library, so a first run has something to show. */
-export function seedUser() {
-  const now = Date.now()
-  const day = 86400000
-  const watchedEpisodes = new Set()
-  const add = (id, s, from, to) => {
-    for (let e = from; e <= to; e++) watchedEpisodes.add(episodeKey(id, s, e))
-  }
-
-  add('severance-point', 1, 1, 9)
-  add('severance-point', 2, 1, 10)
-  add('severance-point', 3, 1, 6)
-  add('harbor-lights', 1, 1, 3)
-  add('saltgrass', 1, 1, 10)
-  add('saltgrass', 2, 1, 4)
-  add('meridian', 1, 1, 9)
-  add('the-quiet-divide', 1, 1, 10)
-  add('the-quiet-divide', 2, 1, 10)
-  add('undertow', 1, 1, 2)
-
-  return {
-    watchedEpisodes,
-    watchedMovies: new Set(['the-salt-path', 'aurora-motel', 'petrichor', 'girder', 'the-foley-artist']),
-    watchlist: ['open-water', 'the-ledger', 'late-frost', 'half-moon-bay', 'vantage'],
-    ratings: {
-      'the-salt-path': 4,
-      'aurora-motel': 3,
-      petrichor: 5,
-      girder: 4,
-      'the-foley-artist': 3,
-      'the-quiet-divide': 5,
-    },
-    lastActivity: [
-      { ts: now - 2 * 3600e3, titleId: 'severance-point', label: 'S03E06' },
-      { ts: now - day, titleId: 'harbor-lights', label: 'S01E03' },
-      { ts: now - 2 * day, titleId: 'saltgrass', label: 'S02E04' },
-      { ts: now - 3 * day, titleId: 'meridian', label: 'S01E09' },
-      { ts: now - 5 * day, titleId: 'undertow', label: 'S01E02' },
-      { ts: now - 6 * day, titleId: 'petrichor', label: 'Watched' },
-      { ts: now - 8 * day, titleId: 'the-quiet-divide', label: 'S02E10' },
-    ],
-  }
-}
-
 /**
  * Read the stored user.
  *
@@ -93,9 +51,9 @@ export function loadUser({ freshStart = false } = {}) {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) return { user: reviveUser(JSON.parse(raw)), storageFailed: false }
   } catch {
-    return { user: seedUser(), storageFailed: true }
+    return { user: emptyUser(), storageFailed: true }
   }
-  return { user: seedUser(), storageFailed: false }
+  return { user: emptyUser(), storageFailed: false }
 }
 
 /** Write the user back. Returns false when storage is unavailable. */

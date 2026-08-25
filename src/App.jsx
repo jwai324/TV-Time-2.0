@@ -156,12 +156,12 @@ export default function App() {
       const resolved = {}
       await Promise.all(
         [...ids].map(async (id) => {
-          const t = await getTitle(id)
+          const t = await getTitle(id).catch(() => null)
           if (t) resolved[id] = t
         })
       )
 
-      const week = await getTrending()
+      const week = await getTrending().catch(() => [])
       week.forEach((t) => {
         resolved[t.id] = resolved[t.id] || t
       })
@@ -196,17 +196,27 @@ export default function App() {
     [freshStart, setUser]
   )
 
+  /** Fetch the full record when we only hold a search/trending summary. */
+  const ensureFull = useCallback(
+    (id) => {
+      const t = titles[id]
+      if (t && !t.partial) return
+      getTitle(id)
+        .then((full) => {
+          if (full) setTitles((prev) => ({ ...prev, [id]: full }))
+        })
+        .catch(() => {})
+    },
+    [titles]
+  )
+
   const openTitle = useCallback(
     (id) => {
-      if (!titles[id]) {
-        getTitle(id).then((t) => {
-          if (t) setTitles((prev) => ({ ...prev, [id]: t }))
-        })
-      }
+      ensureFull(id)
       setTitleId(id)
       setScreen('title')
     },
-    [titles]
+    [ensureFull]
   )
 
   const goTab = useCallback((next) => {
@@ -217,13 +227,14 @@ export default function App() {
 
   const toggleWatchlist = useCallback(
     (id) => {
+      ensureFull(id)
       mutate((u) => {
         const i = u.watchlist.indexOf(id)
         if (i >= 0) u.watchlist.splice(i, 1)
         else u.watchlist.push(id)
       })
     },
-    [mutate]
+    [mutate, ensureFull]
   )
 
   /**
@@ -354,26 +365,32 @@ export default function App() {
   )
 
   const queryRef = useRef('')
+  const searchTimer = useRef(null)
   const onSearch = useCallback((value) => {
     queryRef.current = value
     setQuery(value)
+    clearTimeout(searchTimer.current)
     if (!value.trim()) {
       setResults([])
       setSearched(false)
       return
     }
-    searchTitles(value).then((found) => {
-      if (queryRef.current !== value) return
-      setTitles((prev) => {
-        const merged = { ...prev }
-        found.forEach((t) => {
-          merged[t.id] = merged[t.id] || t
+    searchTimer.current = setTimeout(() => {
+      searchTitles(value)
+        .then((found) => {
+          if (queryRef.current !== value) return
+          setTitles((prev) => {
+            const merged = { ...prev }
+            found.forEach((t) => {
+              merged[t.id] = merged[t.id] || t
+            })
+            return merged
+          })
+          setResults(found)
+          setSearched(true)
         })
-        return merged
-      })
-      setResults(found)
-      setSearched(true)
-    })
+        .catch(() => {})
+    }, 300)
   }, [])
 
   const account = useMemo(
@@ -521,7 +538,9 @@ export default function App() {
       name: t.name,
       isShow,
       isMovie: !isShow,
-      meta: `${t.year} · ${t.genres.join(' · ')}${isShow ? ` · ${t.status === 'returning' ? 'returning' : 'ended'}` : ''}`,
+      meta: [t.year || null, ...t.genres, isShow ? (t.status === 'returning' ? 'returning' : 'ended') : null]
+        .filter(Boolean)
+        .join(' · '),
       overview: t.overview,
       progressLine: c ? `${c.watched} of ${c.total} episodes · ${pct}%` : '',
       pct,
@@ -573,9 +592,9 @@ export default function App() {
       id: t.id,
       title: t,
       name: t.name,
-      meta: withType
-        ? `${t.year} · ${t.type === 'show' ? 'show' : 'film'} · ${t.genres[0]}`
-        : `${t.year} · ${t.type === 'show' ? 'show' : 'film'}`,
+      meta: [t.year || null, t.type === 'show' ? 'show' : 'film', withType ? t.genres[0] : null]
+        .filter(Boolean)
+        .join(' · '),
       inWatchlist: user ? user.watchlist.includes(t.id) : false,
       onWatchlist: () => toggleWatchlist(t.id),
     }),

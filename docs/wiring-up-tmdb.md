@@ -3,6 +3,11 @@
 A step-by-step guide to replacing Tideline's fictional catalog with real data
 from [The Movie Database](https://www.themoviedb.org/) (TMDB).
 
+> **Status: implemented** via Option A (the Supabase Edge Function proxy).
+> The function is deployed as `tmdb`; the one manual step is setting the
+> `TMDB_TOKEN` secret in the Supabase dashboard (Project Settings → Edge
+> Functions → Secrets). This document remains as the design record.
+
 ## Why this is a small change
 
 Every screen gets its titles through exactly three async functions in

@@ -249,6 +249,17 @@ export default function Stats({ tiles, topGenres, account }) {
       </div>
 
       {account && <AccountCard account={account} />}
+
+      <div
+        style={{
+          padding: '22px 20px 8px',
+          font: "400 10.5px 'IBM Plex Mono', monospace",
+          color: 'var(--drift)',
+        }}
+      >
+        This product uses the <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a> API
+        but is not endorsed or certified by TMDB.
+      </div>
     </>
   )
 }
