@@ -51,11 +51,20 @@ export function counts(title, watchedEpisodes) {
   return { total, watched }
 }
 
-/** Completion 0–100. A film is all or nothing. */
+/**
+ * Completion 0–100. A film is all or nothing.
+ *
+ * The endpoints are exact, never rounded: 100 means every episode is watched
+ * and 0 means none are. Otherwise 249 of 250 would round to 100 and read as
+ * finished everywhere a screen tests pct — dropping the show off Up Next with
+ * an episode still to watch. In between, rounding is clamped to 1–99.
+ */
 export function pctOf(title, user) {
   if (title.type === 'movie') return user.watchedMovies.has(title.id) ? 100 : 0
   const { total, watched } = counts(title, user.watchedEpisodes)
-  return total ? Math.round((watched / total) * 100) : 0
+  if (!total || !watched) return 0
+  if (watched >= total) return 100
+  return Math.min(99, Math.max(1, Math.round((watched / total) * 100)))
 }
 
 /** Minutes of unwatched runtime left on a title. */
