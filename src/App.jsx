@@ -296,10 +296,11 @@ export default function App() {
           u.watchedEpisodes.add(episodeKey(id, next.season, next.episode))
           recordActivity(u, id, episodeCode(next.season, next.episode))
         })
-        // Keep a just-finished show on screen showing "All caught up" rather
-        // than yanking the card out from under the tap.
+        // A caught-up show leaves Up Next; it returns when a new episode airs
+        // or the latest one is un-marked. Clear any pin from an earlier undo
+        // so it can't hold the finished card on screen.
         if (!nextUnwatched(title, userRef.current.watchedEpisodes)) {
-          setPinned((f) => ({ ...f, [id]: true }))
+          setPinned((f) => (f[id] ? { ...f, [id]: false } : f))
         }
         setAnim((a) => ({ ...a, [id]: 'in' }))
         later(() => setAnim((a) => ({ ...a, [id]: null })), 40)
@@ -355,7 +356,7 @@ export default function App() {
     [anim, titles, mutate, later]
   )
 
-  /** Mark a queued film watched from Up Next; the card pins, reading "Watched". */
+  /** Mark a queued film watched from Up Next; the card leaves the queue. */
   const markMovieNext = useCallback(
     (id) => {
       if (anim[id]) return
@@ -366,7 +367,7 @@ export default function App() {
           u.watchedMovies.add(id)
           recordActivity(u, id, 'Watched')
         })
-        setPinned((f) => ({ ...f, [id]: true }))
+        setPinned((f) => (f[id] ? { ...f, [id]: false } : f))
         setAnim((a) => ({ ...a, [id]: 'in' }))
         later(() => setAnim((a) => ({ ...a, [id]: null })), 40)
       }, 190)

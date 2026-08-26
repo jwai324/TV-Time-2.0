@@ -57,12 +57,12 @@ the built app matches the artboard pixel for pixel. Two details worth naming:
 These are deliberate choices in the design's logic, not accidents, so they are
 reproduced as-is:
 
-- A show you *just* finished stays on Up Next reading **All caught up** until
-  the next load, rather than vanishing under your tap — it sinks to the bottom
-  of the list so what is still in progress stays on top.
+- A caught-up show leaves Up Next as soon as its last episode is marked, and
+  returns the moment there is something to watch again — a new episode airs
+  (unaired episodes join the list on their air date), or you un-mark the
+  latest one from the title screen.
 - Up Next fixes its order when first built and holds it, so cards never
-  reshuffle while you are working down the list; sinking a caught-up show is
-  the one exception.
+  reshuffle while you are working down the list.
 - A season opens by default when it holds your next unwatched episode — which
   means a season you fully complete closes itself.
 - `episodes this month` counts single-episode activity only; *Catch up* and
