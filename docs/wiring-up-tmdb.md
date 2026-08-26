@@ -247,12 +247,21 @@ export async function getTitle(id) {
     title = mapMovie(await tmdb(`/3/movie/${parsed.num}`))
   } else {
     const tv = await tmdb(`/3/tv/${parsed.num}`)
-    // append_to_response fetches up to 20 seasons in ONE request
-    const nums = tv.seasons.filter((s) => s.season_number > 0).map((s) => s.season_number)
-    const appended = await tmdb(`/3/tv/${parsed.num}`, {
-      append_to_response: nums.slice(0, 20).map((n) => `season/${n}`).join(','),
-    })
-    title = mapShow(tv, nums.map((n) => appended[`season/${n}`]).filter(Boolean))
+    // append_to_response accepts AT MOST 20 sub-requests per call, so fetch
+    // season payloads in chunks of 20 (capped at 200 seasons).
+    const nums = tv.seasons
+      .filter((s) => s.season_number > 0)
+      .map((s) => s.season_number)
+      .slice(0, 200)
+    const chunks = []
+    for (let i = 0; i < nums.length; i += 20) chunks.push(nums.slice(i, i + 20))
+    const details = (await Promise.all(chunks.map(async (chunk) => {
+      const appended = await tmdb(`/3/tv/${parsed.num}`, {
+        append_to_response: chunk.map((n) => `season/${n}`).join(','),
+      })
+      return chunk.map((n) => appended[`season/${n}`]).filter(Boolean)
+    }))).flat()
+    title = mapShow(tv, details)
   }
   cache.set(id, title)
   return title
