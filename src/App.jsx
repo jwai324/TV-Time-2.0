@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { getRecommendations, getTitle, getTrending, searchTitles } from './data/catalog.js'
+import { COLLECTION_KEYS, getCollection, getRecommendations, getTitle, searchTitles } from './data/catalog.js'
 import {
   counts,
   episodeCode,
@@ -65,7 +65,7 @@ export default function App() {
   const sessionRef = useRef(null)
   sessionRef.current = session
   const [titles, setTitles] = useState({})
-  const [trending, setTrending] = useState([])
+  const [collections, setCollections] = useState({})
 
   // `user` is mirrored into a ref so an action can read the value a previous
   // action just wrote, without waiting for a re-render.
@@ -164,15 +164,19 @@ export default function App() {
         })
       )
 
-      const week = await getTrending().catch(() => [])
-      week.forEach((t) => {
-        resolved[t.id] = resolved[t.id] || t
-      })
+      const rails = Object.fromEntries(
+        await Promise.all(COLLECTION_KEYS.map(async (key) => [key, await getCollection(key).catch(() => [])]))
+      )
+      Object.values(rails).forEach((list) =>
+        list.forEach((t) => {
+          resolved[t.id] = resolved[t.id] || t
+        })
+      )
 
       if (cancelled) return
       setUser(stored)
       setTitles(resolved)
-      setTrending(week)
+      setCollections(rails)
       setStorageFailed(readFailed || !persistUser(stored, { freshStart }))
       setLoaded(true)
     })()
@@ -436,7 +440,7 @@ export default function App() {
       )
       const ranked = [...scored.values()]
         .sort((a, b) => b.hits - a.hits || a.best - b.best)
-        .slice(0, 10)
+        .slice(0, 20)
         .map((e) => e.t)
       setRecs(ranked)
       setTitles((prev) => {
@@ -658,8 +662,26 @@ export default function App() {
   )
 
   const resultItems = useMemo(() => results.map((t) => discoverItem(t, true)), [results, discoverItem])
-  const trendingItems = useMemo(() => trending.map((t) => discoverItem(t, false)), [trending, discoverItem])
   const recItems = useMemo(() => recs.map((t) => discoverItem(t, false)), [recs, discoverItem])
+
+  const discoverRows = useMemo(() => {
+    const defs = [
+      ['trending', 'Trending this week'],
+      ['airing', 'Airing now'],
+      ['theaters', 'In theaters'],
+      ['topShows', 'Top rated shows'],
+      ['topFilms', 'Top rated films'],
+      ['upcoming', 'Coming soon'],
+    ]
+    return [
+      { key: 'foryou', label: 'For you', items: recItems },
+      ...defs.map(([key, label]) => ({
+        key,
+        label,
+        items: (collections[key] || []).map((t) => discoverItem(t, false)),
+      })),
+    ]
+  }, [recItems, collections, discoverItem])
 
   const statsView = useMemo(() => {
     if (!user) return { tiles: [], topGenres: [] }
@@ -797,9 +819,8 @@ export default function App() {
             onSearch={onSearch}
             showResults={searched && query.trim().length > 0}
             results={resultItems}
-            showTrending={!query.trim()}
-            trending={trendingItems}
-            recommended={recItems}
+            showRows={!query.trim()}
+            rows={discoverRows}
             dark={dark}
             onOpen={openTitle}
           />

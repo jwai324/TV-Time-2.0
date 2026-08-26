@@ -89,17 +89,7 @@ function PosterRow({ label, items, dark, onOpen }) {
   )
 }
 
-export default function Discover({
-  query,
-  onSearch,
-  showResults,
-  results,
-  showTrending,
-  trending,
-  recommended = [],
-  dark,
-  onOpen,
-}) {
+export default function Discover({ query, onSearch, showResults, results, showRows, rows, dark, onOpen }) {
   return (
     <>
       <div style={{ padding: '28px 20px 10px' }}>
@@ -206,10 +196,13 @@ export default function Discover({
         </>
       )}
 
-      {showTrending && recommended.length > 0 && (
-        <PosterRow label="For you" items={recommended} dark={dark} onOpen={onOpen} />
-      )}
-      {showTrending && <PosterRow label="Trending this week" items={trending} dark={dark} onOpen={onOpen} />}
+      {showRows &&
+        rows.map(
+          (row) =>
+            row.items.length > 0 && (
+              <PosterRow key={row.key} label={row.label} items={row.items} dark={dark} onOpen={onOpen} />
+            )
+        )}
     </>
   )
 }

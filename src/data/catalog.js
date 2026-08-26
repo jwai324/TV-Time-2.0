@@ -152,10 +152,31 @@ export async function getTitle(id) {
 
 const isTitle = (r) => r.media_type === 'movie' || r.media_type === 'tv'
 
-/** This week's trending shows and films. */
-export async function getTrending() {
-  const { results } = await tmdb('/3/trending/all/week')
-  return (results ?? []).filter(isTitle).slice(0, 10).map(mapSummary)
+/*
+ * The Discover rails. Trending mixes both media types (TMDB tags each
+ * result); the single-type endpoints don't carry media_type, so it is
+ * stamped on before mapping.
+ */
+const COLLECTIONS = {
+  trending: { path: '/3/trending/all/week' },
+  airing: { path: '/3/tv/on_the_air', type: 'tv' },
+  theaters: { path: '/3/movie/now_playing', type: 'movie' },
+  topShows: { path: '/3/tv/top_rated', type: 'tv' },
+  topFilms: { path: '/3/movie/top_rated', type: 'movie' },
+  upcoming: { path: '/3/movie/upcoming', type: 'movie' },
+}
+
+export const COLLECTION_KEYS = Object.keys(COLLECTIONS)
+
+/** One Discover rail — a full TMDB page, up to 20 titles. */
+export async function getCollection(key) {
+  const def = COLLECTIONS[key]
+  const { results } = await tmdb(def.path)
+  return (results ?? [])
+    .map((r) => (def.type ? { ...r, media_type: def.type } : r))
+    .filter(isTitle)
+    .slice(0, 20)
+    .map(mapSummary)
 }
 
 /**
