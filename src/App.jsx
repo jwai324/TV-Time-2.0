@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { COLLECTION_KEYS, getCollection, getRecommendations, getTitle, searchTitles } from './data/catalog.js'
+import { COLLECTION_KEYS, getCollection, getGenreRail, getRecommendations, getTitle, searchTitles } from './data/catalog.js'
 import {
   counts,
   episodeCode,
@@ -85,6 +85,8 @@ export default function App() {
 
   const [recs, setRecs] = useState([])
   const recSig = useRef('')
+  const [genreRails, setGenreRails] = useState([])
+  const genreSig = useRef('')
 
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
@@ -551,6 +553,43 @@ export default function App() {
     [user, titles]
   )
 
+  /*
+   * "Because you like <genre>": one rail per top-two genre, tallied the same
+   * way Stats does (a started show or a watched film counts). Tracked titles
+   * are excluded, and the rails refetch only when the top genres change.
+   */
+  useEffect(() => {
+    if (!loaded || !user) return
+    const tally = {}
+    tracked.forEach((t) => {
+      const engaged =
+        t.type === 'movie' ? user.watchedMovies.has(t.id) : counts(t, user.watchedEpisodes).watched > 0
+      if (engaged) t.genres.forEach((g) => { tally[g] = (tally[g] || 0) + 1 })
+    })
+    const top = Object.entries(tally)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+      .map(([g]) => g)
+    const sig = top.join(',')
+    if (sig === genreSig.current) return
+    genreSig.current = sig
+    if (!top.length) {
+      setGenreRails([])
+      return
+    }
+    Promise.all(
+      top.map(async (genre) => ({ genre, items: await getGenreRail(genre).catch(() => []) }))
+    ).then((rails) => {
+      if (genreSig.current !== sig) return
+      setGenreRails(rails)
+      setTitles((prev) => {
+        const merged = { ...prev }
+        rails.forEach((r) => r.items.forEach((t) => { merged[t.id] = merged[t.id] || t }))
+        return merged
+      })
+    })
+  }, [loaded, user, tracked])
+
   const libItems = useMemo(() => {
     if (!user) return []
     const filtered =
@@ -664,6 +703,8 @@ export default function App() {
   const resultItems = useMemo(() => results.map((t) => discoverItem(t, true)), [results, discoverItem])
   const recItems = useMemo(() => recs.map((t) => discoverItem(t, false)), [recs, discoverItem])
 
+  const trackedSet = useMemo(() => new Set(user ? trackedIds(user) : []), [user])
+
   const discoverRows = useMemo(() => {
     const defs = [
       ['trending', 'Trending this week'],
@@ -675,13 +716,22 @@ export default function App() {
     ]
     return [
       { key: 'foryou', label: 'For you', items: recItems },
+      // Personal genre rails sit above the global lists. Tracked titles are
+      // filtered here, at render, so adding one removes it without a refetch.
+      ...genreRails
+        .map((r) => ({
+          key: `genre-${r.genre}`,
+          label: `Because you like ${r.genre}`,
+          items: r.items.filter((t) => !trackedSet.has(t.id)).map((t) => discoverItem(t, false)),
+        }))
+        .filter((r) => r.items.length > 0),
       ...defs.map(([key, label]) => ({
         key,
         label,
         items: (collections[key] || []).map((t) => discoverItem(t, false)),
       })),
     ]
-  }, [recItems, collections, discoverItem])
+  }, [recItems, genreRails, trackedSet, collections, discoverItem])
 
   const statsView = useMemo(() => {
     if (!user) return { tiles: [], topGenres: [] }

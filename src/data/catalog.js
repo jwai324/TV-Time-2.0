@@ -179,6 +179,55 @@ export async function getCollection(key) {
     .map(mapSummary)
 }
 
+/*
+ * TMDB's genre ids differ between movies and TV (and some names exist on only
+ * one side), so genre rails resolve names through both lists — fetched once
+ * and cached for the session.
+ */
+let genreMapsPromise = null
+function genreMaps() {
+  if (!genreMapsPromise) {
+    genreMapsPromise = Promise.all([tmdb('/3/genre/movie/list'), tmdb('/3/genre/tv/list')]).then(
+      ([movie, tv]) => ({
+        movie: new Map((movie.genres ?? []).map((g) => [g.name, g.id])),
+        tv: new Map((tv.genres ?? []).map((g) => [g.name, g.id])),
+      })
+    )
+  }
+  return genreMapsPromise
+}
+
+/**
+ * Popular titles in one genre, by name — movies and shows interleaved so the
+ * rail mixes both. Names unknown to a media type just skip that side.
+ */
+export async function getGenreRail(genreName) {
+  const maps = await genreMaps()
+  const sides = []
+  const movieId = maps.movie.get(genreName)
+  const tvId = maps.tv.get(genreName)
+  if (movieId) {
+    sides.push(
+      tmdb('/3/discover/movie', { with_genres: String(movieId), sort_by: 'popularity.desc' }).then(
+        (r) => (r.results ?? []).map((x) => ({ ...x, media_type: 'movie' }))
+      )
+    )
+  }
+  if (tvId) {
+    sides.push(
+      tmdb('/3/discover/tv', { with_genres: String(tvId), sort_by: 'popularity.desc' }).then(
+        (r) => (r.results ?? []).map((x) => ({ ...x, media_type: 'tv' }))
+      )
+    )
+  }
+  const lists = await Promise.all(sides)
+  const blended = []
+  for (let i = 0; blended.length < 40 && lists.some((l) => i < l.length); i++) {
+    for (const l of lists) if (l[i]) blended.push(l[i])
+  }
+  return blended.filter(isTitle).slice(0, 20).map(mapSummary)
+}
+
 /**
  * Titles TMDB pairs with one the user has watched. Summaries, like search
  * results — callers blend lists from several seed titles.
