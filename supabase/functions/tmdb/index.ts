@@ -3,7 +3,7 @@
 // reaches the browser. The allowlist is the access control — only public
 // catalog reads can pass through, so the function itself is public
 // (verify_jwt off; the publishable key is not a JWT).
-const ALLOWED = /^\/3\/(search\/multi|trending\/all\/week|movie\/\d+|tv\/\d+(\/season\/\d+)?)$/
+const ALLOWED = /^\/3\/(search\/multi|trending\/all\/week|movie\/\d+(\/recommendations)?|tv\/\d+(\/season\/\d+|\/recommendations)?)$/
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',

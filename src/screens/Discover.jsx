@@ -25,7 +25,81 @@ function WatchlistButton({ item, style }) {
   )
 }
 
-export default function Discover({ query, onSearch, showResults, results, showTrending, trending, dark, onOpen }) {
+/** A labelled horizontal poster rail — used for "For you" and "Trending". */
+function PosterRow({ label, items, dark, onOpen }) {
+  return (
+    <>
+      <div
+        style={{
+          padding: '24px 20px 8px',
+          font: "400 11px 'IBM Plex Mono', monospace",
+          color: 'var(--drift)',
+          textTransform: 'uppercase',
+          letterSpacing: '.08em',
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ display: 'flex', gap: 12, overflowX: 'auto', padding: '0 20px 8px' }}>
+        {items.map((tr) => (
+          <div key={tr.id} style={{ flex: 'none', width: 118 }}>
+            <button
+              className="tl-focus-r10"
+              onClick={() => onOpen(tr.id)}
+              style={{
+                display: 'block',
+                width: '100%',
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                margin: 0,
+                textAlign: 'left',
+                cursor: 'pointer',
+                color: 'inherit',
+              }}
+            >
+              <Poster title={tr.title} dark={dark} width={118} height={164} radius={10} />
+              <div
+                style={{
+                  font: "600 13px/1.25 'Bricolage Grotesque', sans-serif",
+                  letterSpacing: '-0.01em',
+                  marginTop: 8,
+                }}
+              >
+                {tr.name}
+              </div>
+              <div
+                style={{
+                  font: "400 10.5px 'IBM Plex Mono', monospace",
+                  color: 'var(--drift)',
+                  marginTop: 3,
+                }}
+              >
+                {tr.meta}
+              </div>
+            </button>
+            <WatchlistButton
+              item={tr}
+              style={{ marginTop: 7, font: "500 12px 'Inter Tight', sans-serif", padding: '7px 11px', minHeight: 34 }}
+            />
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+export default function Discover({
+  query,
+  onSearch,
+  showResults,
+  results,
+  showTrending,
+  trending,
+  recommended = [],
+  dark,
+  onOpen,
+}) {
   return (
     <>
       <div style={{ padding: '28px 20px 10px' }}>
@@ -132,66 +206,10 @@ export default function Discover({ query, onSearch, showResults, results, showTr
         </>
       )}
 
-      {showTrending && (
-        <>
-          <div
-            style={{
-              padding: '24px 20px 8px',
-              font: "400 11px 'IBM Plex Mono', monospace",
-              color: 'var(--drift)',
-              textTransform: 'uppercase',
-              letterSpacing: '.08em',
-            }}
-          >
-            Trending this week
-          </div>
-          <div style={{ display: 'flex', gap: 12, overflowX: 'auto', padding: '0 20px 8px' }}>
-            {trending.map((tr) => (
-              <div key={tr.id} style={{ flex: 'none', width: 118 }}>
-                <button
-                  className="tl-focus-r10"
-                  onClick={() => onOpen(tr.id)}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    margin: 0,
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    color: 'inherit',
-                  }}
-                >
-                  <Poster title={tr.title} dark={dark} width={118} height={164} radius={10} />
-                  <div
-                    style={{
-                      font: "600 13px/1.25 'Bricolage Grotesque', sans-serif",
-                      letterSpacing: '-0.01em',
-                      marginTop: 8,
-                    }}
-                  >
-                    {tr.name}
-                  </div>
-                  <div
-                    style={{
-                      font: "400 10.5px 'IBM Plex Mono', monospace",
-                      color: 'var(--drift)',
-                      marginTop: 3,
-                    }}
-                  >
-                    {tr.meta}
-                  </div>
-                </button>
-                <WatchlistButton
-                  item={tr}
-                  style={{ marginTop: 7, font: "500 12px 'Inter Tight', sans-serif", padding: '7px 11px', minHeight: 34 }}
-                />
-              </div>
-            ))}
-          </div>
-        </>
+      {showTrending && recommended.length > 0 && (
+        <PosterRow label="For you" items={recommended} dark={dark} onOpen={onOpen} />
       )}
+      {showTrending && <PosterRow label="Trending this week" items={trending} dark={dark} onOpen={onOpen} />}
     </>
   )
 }

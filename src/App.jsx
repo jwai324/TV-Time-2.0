@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { getTitle, getTrending, searchTitles } from './data/catalog.js'
+import { getRecommendations, getTitle, getTrending, searchTitles } from './data/catalog.js'
 import {
   counts,
   episodeCode,
@@ -82,6 +82,9 @@ export default function App() {
 
   const [filter, setFilter] = useState('All')
   const [sortBy, setSortBy] = useState('recent')
+
+  const [recs, setRecs] = useState([])
+  const recSig = useRef('')
 
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
@@ -393,6 +396,59 @@ export default function App() {
     }, 300)
   }, [])
 
+  /*
+   * "For you": blend TMDB's recommendations for the five most recently
+   * active titles the user has actually watched (a show with progress, or a
+   * watched film). A title recommended by several of those seeds outranks a
+   * one-off, already-tracked titles are excluded, and the row refreshes only
+   * when the seed set itself changes.
+   */
+  useEffect(() => {
+    if (!loaded || !user) return
+    const seeds = trackedIds(user)
+      .map((id) => titles[id])
+      .filter(Boolean)
+      .filter((t) =>
+        t.type === 'movie' ? user.watchedMovies.has(t.id) : counts(t, user.watchedEpisodes).watched > 0
+      )
+      .sort((a, b) => lastTs(user, b.id) - lastTs(user, a.id))
+      .slice(0, 5)
+      .map((t) => t.id)
+    const sig = seeds.join(',')
+    if (sig === recSig.current) return
+    recSig.current = sig
+    if (!seeds.length) {
+      setRecs([])
+      return
+    }
+    Promise.all(seeds.map((id) => getRecommendations(id).catch(() => []))).then((lists) => {
+      if (recSig.current !== sig) return
+      const tracked = new Set(trackedIds(userRef.current))
+      const scored = new Map()
+      lists.forEach((list) =>
+        list.forEach((t, position) => {
+          if (tracked.has(t.id)) return
+          const entry = scored.get(t.id) || { t, hits: 0, best: position }
+          entry.hits += 1
+          entry.best = Math.min(entry.best, position)
+          scored.set(t.id, entry)
+        })
+      )
+      const ranked = [...scored.values()]
+        .sort((a, b) => b.hits - a.hits || a.best - b.best)
+        .slice(0, 10)
+        .map((e) => e.t)
+      setRecs(ranked)
+      setTitles((prev) => {
+        const merged = { ...prev }
+        ranked.forEach((t) => {
+          merged[t.id] = merged[t.id] || t
+        })
+        return merged
+      })
+    })
+  }, [loaded, user, titles])
+
   const account = useMemo(
     () => ({
       email: session?.user?.email ?? null,
@@ -603,6 +659,7 @@ export default function App() {
 
   const resultItems = useMemo(() => results.map((t) => discoverItem(t, true)), [results, discoverItem])
   const trendingItems = useMemo(() => trending.map((t) => discoverItem(t, false)), [trending, discoverItem])
+  const recItems = useMemo(() => recs.map((t) => discoverItem(t, false)), [recs, discoverItem])
 
   const statsView = useMemo(() => {
     if (!user) return { tiles: [], topGenres: [] }
@@ -742,6 +799,7 @@ export default function App() {
             results={resultItems}
             showTrending={!query.trim()}
             trending={trendingItems}
+            recommended={recItems}
             dark={dark}
             onOpen={openTitle}
           />

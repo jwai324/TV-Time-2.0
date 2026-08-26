@@ -158,6 +158,17 @@ export async function getTrending() {
   return (results ?? []).filter(isTitle).slice(0, 10).map(mapSummary)
 }
 
+/**
+ * Titles TMDB pairs with one the user has watched. Summaries, like search
+ * results — callers blend lists from several seed titles.
+ */
+export async function getRecommendations(id) {
+  const parsed = parseId(id)
+  if (!parsed) return []
+  const { results } = await tmdb(`/3/${parsed.type}/${parsed.num}/recommendations`)
+  return (results ?? []).filter(isTitle).map(mapSummary)
+}
+
 /** Search shows and films by name. */
 export async function searchTitles(query) {
   const q = query.trim()
