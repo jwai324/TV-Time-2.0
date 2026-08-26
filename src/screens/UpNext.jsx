@@ -100,7 +100,7 @@ export default function UpNext({ cards, dark, onDiscover }) {
                           color: 'var(--sub)',
                         }}
                       >
-                        All caught up
+                        {c.doneLabel}
                       </div>
                     ) : (
                       <>
@@ -108,16 +108,18 @@ export default function UpNext({ cards, dark, onDiscover }) {
                           <span style={{ font: "500 11.5px 'IBM Plex Mono', monospace", color: 'var(--aqua)' }}>
                             {c.code}
                           </span>
-                          <span
-                            style={{
-                              font: "400 13.5px 'Inter Tight', sans-serif",
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                            }}
-                          >
-                            {c.epName}
-                          </span>
+                          {c.epName && (
+                            <span
+                              style={{
+                                font: "400 13.5px 'Inter Tight', sans-serif",
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                            >
+                              {c.epName}
+                            </span>
+                          )}
                         </div>
                         <div
                           style={{

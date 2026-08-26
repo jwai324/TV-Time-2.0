@@ -188,6 +188,37 @@ export default function App() {
     }
   }, [freshStart, setUser])
 
+  /*
+   * Whenever the user record changes (chiefly: replaced by the account's
+   * record at sign-in), fetch full titles for any tracked id this device
+   * doesn't hold yet — otherwise shows watched on another device silently
+   * miss Up Next and the Library. Ids already being fetched (or known
+   * unresolvable) are skipped.
+   */
+  const titleFetches = useRef(new Set())
+  useEffect(() => {
+    if (!loaded || !user) return
+    const need = new Set(trackedIds(user))
+    user.lastActivity.forEach((a) => need.add(a.titleId))
+    const missing = [...need].filter((id) => {
+      const t = titles[id]
+      return (!t || t.partial) && !titleFetches.current.has(id)
+    })
+    if (!missing.length) return
+    missing.forEach((id) => titleFetches.current.add(id))
+    Promise.all(missing.map(async (id) => [id, await getTitle(id).catch(() => null)])).then((pairs) => {
+      const found = pairs.filter(([, t]) => t)
+      if (!found.length) return
+      setTitles((prev) => {
+        const merged = { ...prev }
+        found.forEach(([id, t]) => {
+          merged[id] = t
+        })
+        return merged
+      })
+    })
+  }, [loaded, user, titles])
+
   /** Apply a mutation to a fresh copy of the user, then persist it. */
   const mutate = useCallback(
     (fn) => {
@@ -286,6 +317,23 @@ export default function App() {
     (id) => {
       if (anim[id]) return
       const title = titles[id]
+
+      if (title.type === 'movie') {
+        if (!userRef.current.watchedMovies.has(id)) return
+        setAnim((a) => ({ ...a, [id]: 'undo-out' }))
+        later(() => {
+          mutate((u) => {
+            u.watchedMovies.delete(id)
+            const i = u.lastActivity.findIndex((a) => a.titleId === id && a.label === 'Watched')
+            if (i >= 0) u.lastActivity.splice(i, 1)
+          })
+          setPinned((f) => ({ ...f, [id]: true }))
+          setAnim((a) => ({ ...a, [id]: 'undo-in' }))
+          later(() => setAnim((a) => ({ ...a, [id]: null })), 40)
+        }, 190)
+        return
+      }
+
       const target = lastWatched(title, userRef.current.watchedEpisodes)
       if (!target) return
 
@@ -305,6 +353,25 @@ export default function App() {
       }, 190)
     },
     [anim, titles, mutate, later]
+  )
+
+  /** Mark a queued film watched from Up Next; the card pins, reading "Watched". */
+  const markMovieNext = useCallback(
+    (id) => {
+      if (anim[id]) return
+      if (userRef.current.watchedMovies.has(id)) return
+      setAnim((a) => ({ ...a, [id]: 'out' }))
+      later(() => {
+        mutate((u) => {
+          u.watchedMovies.add(id)
+          recordActivity(u, id, 'Watched')
+        })
+        setPinned((f) => ({ ...f, [id]: true }))
+        setAnim((a) => ({ ...a, [id]: 'in' }))
+        later(() => setAnim((a) => ({ ...a, [id]: null })), 40)
+      }, 190)
+    },
+    [anim, mutate, later]
   )
 
   const toggleEpisode = useCallback(
@@ -478,41 +545,52 @@ export default function App() {
 
   // --- Derived views -------------------------------------------------------
 
-  const inProgress = useMemo(() => {
+  const queue = useMemo(() => {
     if (!user) return []
-    return Object.values(titles).filter(
-      (t) =>
-        t.type === 'show' &&
-        (counts(t, user.watchedEpisodes).watched > 0 || pinned[t.id]) &&
-        (pctOf(t, user) < 100 || pinned[t.id])
-    )
+    return Object.values(titles).filter((t) => {
+      if (t.partial) return false
+      if (pinned[t.id]) return true
+      if (t.type === 'show') {
+        const watched = counts(t, user.watchedEpisodes).watched
+        if (watched > 0) return pctOf(t, user) < 100
+        return user.watchlist.includes(t.id) // queued but not started
+      }
+      return user.watchlist.includes(t.id) && !user.watchedMovies.has(t.id)
+    })
   }, [titles, user, pinned])
 
   // Up Next is ordered by recent activity when it is first built, then holds
   // that order so a card never jumps while you are working down the list.
   const upOrder = useRef(null)
   if (loaded && user && upOrder.current === null) {
-    upOrder.current = inProgress
+    const wlIndex = (t) => {
+      const i = user.watchlist.indexOf(t.id)
+      return i < 0 ? Number.MAX_SAFE_INTEGER : i
+    }
+    upOrder.current = queue
       .slice()
-      .sort((a, b) => lastTs(user, b.id) - lastTs(user, a.id))
+      .sort((a, b) => lastTs(user, b.id) - lastTs(user, a.id) || wlIndex(a) - wlIndex(b))
       .map((t) => t.id)
   }
   if (upOrder.current) {
-    inProgress.forEach((t) => {
+    queue.forEach((t) => {
       if (!upOrder.current.includes(t.id)) upOrder.current.push(t.id)
     })
   }
 
   const cards = useMemo(() => {
     if (!user || !upOrder.current) return []
-    const held = upOrder.current.filter((id) => inProgress.some((t) => t.id === id))
-    // Caught-up shows sink to the bottom; each group keeps the held order, so
+    const held = upOrder.current.filter((id) => queue.some((t) => t.id === id))
+    // Finished cards sink to the bottom; each group keeps the held order, so
     // nothing else shifts when a card finishes or an Undo brings it back.
-    const caughtUp = (id) => !nextUnwatched(titles[id], user.watchedEpisodes)
+    const caughtUp = (id) =>
+      titles[id].type === 'movie'
+        ? user.watchedMovies.has(id)
+        : !nextUnwatched(titles[id], user.watchedEpisodes)
     return [...held.filter((id) => !caughtUp(id)), ...held.filter(caughtUp)]
       .map((id) => {
         const title = titles[id]
-        const next = nextUnwatched(title, user.watchedEpisodes)
+        const next = title.type === 'show' ? nextUnwatched(title, user.watchedEpisodes) : null
         const state = anim[id]
         // Mark slides the episode line up and out; Undo runs the same move
         // in reverse, so the direction of travel matches the action.
@@ -526,13 +604,36 @@ export default function App() {
                 : state === 'undo-in'
                   ? { opacity: 0, transform: 'translateY(-6px)', transition: 'none' }
                   : { opacity: 1, transform: 'none', transition: 'opacity .22s ease, transform .22s ease' }
-        const undoTarget = lastWatched(title, user.watchedEpisodes)
+        const undoTarget = title.type === 'show' ? lastWatched(title, user.watchedEpisodes) : null
+
+        if (title.type === 'movie') {
+          const watched = user.watchedMovies.has(id)
+          return {
+            id,
+            title,
+            name: title.name,
+            done: watched,
+            doneLabel: 'Watched',
+            code: 'Film',
+            epName: '',
+            rt: `${title.runtimeMinutes} min`,
+            pct: watched ? 100 : 0,
+            wash: wash(title),
+            infoStyle,
+            canUndo: watched,
+            undoCode: title.name,
+            onMark: () => markMovieNext(id),
+            onUndo: () => undoLast(id),
+            onOpen: () => openTitle(id),
+          }
+        }
 
         return {
           id,
           title,
           name: title.name,
           done: !next,
+          doneLabel: 'All caught up',
           code: next ? episodeCode(next.season, next.episode) : '',
           epName: next ? next.ep.name : '',
           rt: next ? `${next.ep.runtimeMinutes} min` : '',
@@ -546,7 +647,7 @@ export default function App() {
           onOpen: () => openTitle(id),
         }
       })
-  }, [inProgress, titles, user, anim, markNext, undoLast, openTitle])
+  }, [queue, titles, user, anim, markNext, markMovieNext, undoLast, openTitle])
 
   const tracked = useMemo(
     () => (user ? trackedIds(user).map((id) => titles[id]).filter(Boolean) : []),
