@@ -167,7 +167,11 @@ Mapping code:
 
 ```js
 const IMG = 'https://image.tmdb.org/t/p/w342'
-const today = () => new Date().toISOString().slice(0, 10)
+// Local calendar date — toISOString() is UTC and rolls over early
+const today = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 // Deterministic hue from the id so the swatch/wash tint stays stable.
 const hueOf = (id) => {

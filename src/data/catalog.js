@@ -50,7 +50,15 @@ function trailerFrom(videos) {
     vids.find((v) => v.type === 'Teaser')
   return pick ? `https://www.youtube.com/watch?v=${pick.key}` : null
 }
-const today = () => new Date().toISOString().slice(0, 10)
+/**
+ * Today as the viewer's LOCAL calendar date. TMDB air dates are plain dates,
+ * and toISOString() is UTC — which rolls to tomorrow during the US evening,
+ * briefly counting tomorrow's episode as aired.
+ */
+const today = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function mapMovie(m) {
   const id = tmdbId('movie', m.id)
