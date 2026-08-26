@@ -644,6 +644,7 @@ export default function App() {
       progressLine: c ? `${c.watched} of ${c.total} episodes · ${pct}%` : '',
       pct,
       inWatchlist,
+      trailerUrl: t.trailerUrl || null,
       watchlistLabel: inWatchlist ? 'On watchlist — remove' : 'Add to watchlist',
       onWatchlist: () => toggleWatchlist(t.id),
       movieWatched,

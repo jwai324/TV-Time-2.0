@@ -38,6 +38,18 @@ const hueOf = (id) => {
 }
 
 const yearOf = (date) => (date ? Number(date.slice(0, 4)) : 0)
+
+/** Best YouTube trailer from a TMDB videos payload: official trailer first,
+ * then any trailer, then a teaser. Null when there's nothing usable. */
+function trailerFrom(videos) {
+  const vids = (videos?.results ?? []).filter((v) => v.site === 'YouTube' && v.key)
+  const pick =
+    vids.find((v) => v.type === 'Trailer' && v.official) ||
+    vids.find((v) => v.type === 'Trailer') ||
+    vids.find((v) => v.type === 'Teaser' && v.official) ||
+    vids.find((v) => v.type === 'Teaser')
+  return pick ? `https://www.youtube.com/watch?v=${pick.key}` : null
+}
 const today = () => new Date().toISOString().slice(0, 10)
 
 function mapMovie(m) {
@@ -52,6 +64,7 @@ function mapMovie(m) {
     posterUrl: m.poster_path ? IMG + m.poster_path : null,
     runtimeMinutes: m.runtime || 120,
     overview: m.overview || '',
+    trailerUrl: trailerFrom(m.videos),
     seasons: [],
   }
 }
@@ -70,6 +83,7 @@ function mapShow(tv, seasonDetails) {
     posterUrl: tv.poster_path ? IMG + tv.poster_path : null,
     runtimeMinutes: fallbackRt,
     overview: tv.overview || '',
+    trailerUrl: trailerFrom(tv.videos),
     seasons: seasonDetails
       // Season 0 is "Specials" — the linear progress model has no place for it.
       .filter((s) => s && s.season_number > 0)
@@ -123,9 +137,9 @@ export async function getTitle(id) {
 
   let title
   if (parsed.type === 'movie') {
-    title = mapMovie(await tmdb(`/3/movie/${parsed.num}`))
+    title = mapMovie(await tmdb(`/3/movie/${parsed.num}`, { append_to_response: 'videos' }))
   } else {
-    const tv = await tmdb(`/3/tv/${parsed.num}`)
+    const tv = await tmdb(`/3/tv/${parsed.num}`, { append_to_response: 'videos' })
     const nums = (tv.seasons ?? [])
       .filter((s) => s.season_number > 0)
       .map((s) => s.season_number)

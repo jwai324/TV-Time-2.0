@@ -56,23 +56,45 @@ export default function TitleDetail({ detail, dark, onBack }) {
                   {detail.progressLine}
                 </div>
               )}
-              <button
-                className="tl-focus tl-hover-pill"
-                onClick={detail.onWatchlist}
-                aria-pressed={detail.inWatchlist}
-                style={{
-                  marginTop: 10,
-                  font: "500 12.5px 'Inter Tight', sans-serif",
-                  color: 'var(--sub)',
-                  background: 'none',
-                  border: '1px solid var(--line)',
-                  borderRadius: 999,
-                  padding: '8px 13px',
-                  cursor: 'pointer',
-                }}
-              >
-                {detail.watchlistLabel}
-              </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                <button
+                  className="tl-focus tl-hover-pill"
+                  onClick={detail.onWatchlist}
+                  aria-pressed={detail.inWatchlist}
+                  style={{
+                    font: "500 12.5px 'Inter Tight', sans-serif",
+                    color: 'var(--sub)',
+                    background: 'none',
+                    border: '1px solid var(--line)',
+                    borderRadius: 999,
+                    padding: '8px 13px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {detail.watchlistLabel}
+                </button>
+                {detail.trailerUrl && (
+                  <a
+                    className="tl-focus tl-hover-pill"
+                    href={detail.trailerUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    style={{
+                      font: "500 12.5px 'Inter Tight', sans-serif",
+                      color: 'var(--sub)',
+                      textDecoration: 'none',
+                      border: '1px solid var(--line)',
+                      borderRadius: 999,
+                      padding: '8px 13px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <span aria-hidden="true" style={{ fontSize: 10 }}>▶</span> Trailer
+                  </a>
+                )}
+              </div>
             </div>
           </div>
 
