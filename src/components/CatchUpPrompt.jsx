@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import Modal from './Modal.jsx'
 
 const pillStyle = {
@@ -22,8 +24,15 @@ const pillStyle = {
  * Dismissing the dialog cancels the mark outright. Nothing has been written
  * yet at this point, so closing an unanswered question is the one reading that
  * cannot be wrong.
+ *
+ * *Don't ask this again* is armed here rather than acted on here. Turning a
+ * question off is not the same as answering it no, so what gets saved is the
+ * answer you then give — and until you give one there is nothing to save,
+ * which is also why dismissing an armed dialog leaves the setting alone.
  */
 export default function CatchUpPrompt({ prompt }) {
+  const [remember, setRemember] = useState(false)
+
   return (
     <Modal label={prompt.heading} onClose={prompt.onCancel}>
       <div
@@ -62,7 +71,7 @@ export default function CatchUpPrompt({ prompt }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 18 }}>
         <button
           className="tl-focus"
-          onClick={prompt.onYes}
+          onClick={() => prompt.onYes(remember)}
           style={{
             font: "500 14px 'Inter Tight', sans-serif",
             color: '#0E332F',
@@ -76,22 +85,21 @@ export default function CatchUpPrompt({ prompt }) {
         >
           {prompt.yesLabel}
         </button>
-        <button className="tl-focus tl-hover-pill" onClick={prompt.onNo} style={pillStyle}>
+        <button className="tl-focus tl-hover-pill" onClick={() => prompt.onNo(remember)} style={pillStyle}>
           {prompt.noLabel}
         </button>
       </div>
 
       {/*
-        A switch rather than a third answer: it says what the app should do
-        next time, and leaves this time's question to the two buttons above.
-        It takes effect the moment it is pressed, which is why the line under
-        it says where to undo that.
+        A switch rather than a third answer: it decides whether this answer
+        outlives the dialog, and leaves what the answer is to the two buttons
+        above. Nothing is written until one of them is pressed.
       */}
       <button
         className="tl-focus tl-hover-line"
         role="switch"
-        aria-checked={!prompt.ask}
-        onClick={prompt.onToggleAsk}
+        aria-checked={remember}
+        onClick={() => setRemember((on) => !on)}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -99,7 +107,7 @@ export default function CatchUpPrompt({ prompt }) {
           width: '100%',
           boxSizing: 'border-box',
           font: "500 12.5px 'Inter Tight', sans-serif",
-          color: prompt.ask ? 'var(--sub)' : 'var(--aqua)',
+          color: remember ? 'var(--aqua)' : 'var(--sub)',
           background: 'none',
           border: '1px solid var(--line)',
           borderRadius: 10,
@@ -123,11 +131,11 @@ export default function CatchUpPrompt({ prompt }) {
             fontSize: 11,
             lineHeight: 1,
             color: '#0E332F',
-            background: prompt.ask ? 'transparent' : 'var(--aqua)',
-            border: `1px solid ${prompt.ask ? 'var(--line)' : 'var(--aqua)'}`,
+            background: remember ? 'var(--aqua)' : 'transparent',
+            border: `1px solid ${remember ? 'var(--aqua)' : 'var(--line)'}`,
           }}
         >
-          {prompt.ask ? '' : '✓'}
+          {remember ? '✓' : ''}
         </span>
         Don't ask this again
       </button>
@@ -136,9 +144,9 @@ export default function CatchUpPrompt({ prompt }) {
         role="status"
         style={{ font: "400 11.5px 'IBM Plex Mono', monospace", color: 'var(--drift)', marginTop: 9 }}
       >
-        {prompt.ask
-          ? 'You can turn this question off for good — Account · Prompts brings it back.'
-          : 'Off from now on. Turn it back on under Account · Prompts.'}
+        {remember
+          ? `Whichever you pick is what happens from now on, without asking. Change it under Account · Prompts.`
+          : `Tick this and your answer is kept for next time, instead of the question coming back.`}
       </div>
     </Modal>
   )

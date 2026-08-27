@@ -10,16 +10,44 @@
 
 export const PREFS_KEY = 'tideline.prefs.v1'
 
-/** Both catch-up questions are asked until you say otherwise. */
+/**
+ * What a catch-up question resolves to.
+ *
+ * `ASK` raises the dialog. The other two are a saved answer: turning a
+ * question off is not the same as answering it no, so the answer you gave when
+ * you silenced it is the one that runs from then on.
+ */
+export const ASK = 'ask'
+export const ALWAYS = 'always'
+export const NEVER = 'never'
+
+const ANSWERS = new Set([ASK, ALWAYS, NEVER])
+
+/** Both catch-up questions are asked until you answer one for good. */
 export const defaultPrefs = () => ({
-  askPreviousSeasons: true,
-  askPreviousEpisodes: true,
+  previousSeasons: ASK,
+  previousEpisodes: ASK,
 })
 
-export const revivePrefs = (p) => ({
-  ...defaultPrefs(),
-  ...(p && typeof p === 'object' ? p : {}),
-})
+/**
+ * Read one question's setting, migrating the boolean the first version stored.
+ *
+ * Back then a silenced prompt could only mean "mark the one thing I ticked" —
+ * there was nothing else to remember — so `false` becomes `NEVER` and readers
+ * who turned a prompt off keep exactly the behaviour they turned it off into.
+ */
+const readAnswer = (value, legacy) => {
+  if (ANSWERS.has(value)) return value
+  return legacy === false ? NEVER : ASK
+}
+
+export const revivePrefs = (p) => {
+  const raw = p && typeof p === 'object' ? p : {}
+  return {
+    previousSeasons: readAnswer(raw.previousSeasons, raw.askPreviousSeasons),
+    previousEpisodes: readAnswer(raw.previousEpisodes, raw.askPreviousEpisodes),
+  }
+}
 
 export function loadPrefs() {
   try {
