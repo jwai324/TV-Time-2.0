@@ -30,23 +30,32 @@ import {
   acceptFriendRequest,
   acceptShare,
   addMarks,
+  answerRecommendation,
   claimUsername,
+  DEFER_DAYS,
+  deferRecommendation,
+  dropRecommendation,
   dropShare,
   endShare,
   fetchFriendships,
   fetchMarks,
   fetchProfile,
   fetchProfiles,
+  fetchRecommendations,
   fetchShares,
   inviteToWatch,
+  RECOMMENDATION_NOTE_MAX,
   removeFriendship,
   removeMark,
   sendFriendRequest,
+  sendRecommendation,
   subscribeSocial,
   usernameAvailable,
   usernameProblem,
 } from './lib/social.js'
 import { supabase } from './lib/supabase.js'
+import RecommendationPrompt from './components/RecommendationPrompt.jsx'
+import RecommendDialog from './components/RecommendDialog.jsx'
 import TabBar from './components/TabBar.jsx'
 import UpNext from './screens/UpNext.jsx'
 import Library from './screens/Library.jsx'
@@ -96,7 +105,7 @@ const writeCollapsed = (value) => {
 const markSig = (m) => `${m.share_id}:${m.kind}:${m.key}`
 const sameMark = (a, b) => a.share_id === b.share_id && a.kind === b.kind && a.key === b.key
 
-const EMPTY_SOCIAL = { friendships: [], shares: [], names: {}, marks: [] }
+const EMPTY_SOCIAL = { friendships: [], shares: [], names: {}, marks: [], recommendations: [] }
 
 /**
  * The design carries `darkMode` and `freshStart` as editor props with no UI
@@ -216,6 +225,27 @@ export default function App() {
   // undone back to zero watched, stays put instead of vanishing under the tap.
   const [pinned, setPinned] = useState({})
 
+  // Recommendations the reader chose to look at the title for before
+  // answering. Held for the session only: the recommendation is still open,
+  // so it is waiting on the Account tab and comes back on the next visit.
+  const [peeked, setPeeked] = useState(() => new Set())
+
+  // Recommendations the reader has asked to answer now, ahead of a deferral
+  // they set earlier. Also session-only: overriding a deferral is a decision
+  // about this moment, not a change to the recommendation.
+  const [answerNow, setAnswerNow] = useState(() => new Set())
+
+  /*
+   * A deferred recommendation is due at a moment, not on a reload, so the
+   * clock the due-check reads has to move. A minute is finer than any deferral
+   * needs and cheap enough to leave running.
+   */
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60000)
+    return () => clearInterval(id)
+  }, [])
+
   const timers = useRef(new Set())
   const later = useCallback((fn, ms) => {
     const id = setTimeout(() => {
@@ -302,7 +332,11 @@ export default function App() {
       return
     }
     try {
-      const [friendships, shares] = await Promise.all([fetchFriendships(), fetchShares()])
+      const [friendships, shares, recommendations] = await Promise.all([
+        fetchFriendships(),
+        fetchShares(),
+        fetchRecommendations(),
+      ])
       const ids = new Set()
       friendships.forEach((f) => {
         ids.add(f.requester)
@@ -312,6 +346,10 @@ export default function App() {
         ids.add(sh.inviter)
         ids.add(sh.invitee)
       })
+      recommendations.forEach((r) => {
+        ids.add(r.sender)
+        ids.add(r.recipient)
+      })
       ids.delete(s.user.id)
       // Marks are read for ended shares too — that is what lets each side
       // keep its own copy of what you watched together.
@@ -319,7 +357,7 @@ export default function App() {
         fetchProfiles([...ids]),
         fetchMarks(shares.filter((sh) => sh.status !== 'pending').map((sh) => sh.id)),
       ])
-      setSocial({ friendships, shares, names, marks })
+      setSocial({ friendships, shares, names, marks, recommendations })
       setSyncFailed(false)
     } catch {
       setSyncFailed(true)
@@ -364,7 +402,9 @@ export default function App() {
   useEffect(() => {
     if (!profile) return
     const refresh = () => {
-      if (document.visibilityState === 'visible') refreshSocial()
+      if (document.visibilityState !== 'visible') return
+      setNow(Date.now())
+      refreshSocial()
     }
     window.addEventListener('focus', refresh)
     document.addEventListener('visibilitychange', refresh)
@@ -475,8 +515,10 @@ export default function App() {
     const need = new Set(trackedIds(user))
     user.lastActivity.forEach((a) => need.add(a.titleId))
     // A show a friend has invited you to watch has to be resolvable before
-    // you have marked anything on it — the invitation names it.
+    // you have marked anything on it — the invitation names it. A recommended
+    // title is the same: the prompt has to be able to show what it is about.
     social.shares.forEach((sh) => need.add(sh.title_id))
+    social.recommendations.forEach((r) => need.add(r.title_id))
     const missing = [...need].filter((id) => {
       const t = titles[id]
       return (!t || t.partial) && !titleFetches.current.has(id)
@@ -494,7 +536,7 @@ export default function App() {
         return merged
       })
     })
-  }, [loaded, user, titles, social.shares])
+  }, [loaded, user, titles, social.shares, social.recommendations])
 
   /** Apply a mutation to a fresh copy of the user, then persist it. */
   const mutate = useCallback(
@@ -621,6 +663,16 @@ export default function App() {
       else addWatched(id, [entry])
     },
     [ensureFull, addWatched, removeWatched]
+  )
+
+  /** Accepting a recommendation adds; a title already queued is left alone. */
+  const addToWatchlist = useCallback(
+    (id) => {
+      ensureFull(id)
+      if (effRef.current.watchlist.includes(id)) return
+      addWatched(id, [{ kind: 'watchlist', key: id }])
+    },
+    [ensureFull, addWatched]
   )
 
   /**
@@ -944,6 +996,187 @@ export default function App() {
     [refreshSocial]
   )
 
+  // --- Recommendations -----------------------------------------------------
+
+  /** Everything anyone has recommended to you, newest question first. */
+  const incomingRecs = useMemo(
+    () =>
+      social.recommendations
+        .filter((r) => r.recipient === myId)
+        .slice()
+        .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)),
+    [social.recommendations, myId]
+  )
+
+  const sentRecs = useMemo(
+    () => social.recommendations.filter((r) => r.sender === myId),
+    [social.recommendations, myId]
+  )
+
+  /**
+   * The open ones to ask about now: not yet answered, not put off until later
+   * — or put off and asked for anyway, which is what `answerNow` holds.
+   */
+  const queuedRecs = useMemo(
+    () =>
+      incomingRecs.filter(
+        (r) =>
+          r.status === 'pending' &&
+          !peeked.has(r.id) &&
+          (answerNow.has(r.id) || !r.remind_at || Date.parse(r.remind_at) <= now)
+      ),
+    [incomingRecs, peeked, answerNow, now]
+  )
+
+  /**
+   * Responding ends the session override: a recommendation pulled forward with
+   * *Decide now* and then put off again is put off, and asking to answer it
+   * now must not outlive the answer.
+   */
+  const clearOverride = useCallback((id) => {
+    setAnswerNow((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+  }, [])
+
+  const answerRec = useCallback(
+    (id, status) => {
+      clearOverride(id)
+      return socialAction(() => answerRecommendation(id, status))
+    },
+    [clearOverride, socialAction]
+  )
+
+  const acceptRec = useCallback(
+    (id, recTitleId) => {
+      addToWatchlist(recTitleId)
+      return answerRec(id, 'accepted')
+    },
+    [addToWatchlist, answerRec]
+  )
+
+  const deferRec = useCallback(
+    (id) => {
+      clearOverride(id)
+      return socialAction(() => deferRecommendation(id))
+    },
+    [clearOverride, socialAction]
+  )
+
+  const dropRec = useCallback((id) => socialAction(() => dropRecommendation(id)), [socialAction])
+
+  /**
+   * The one recommendation being asked about right now.
+   *
+   * They arrive one at a time even when several are waiting — three films at
+   * once is a list to get through, not a question to answer — so the prompt
+   * says how many are behind it and the next takes its place once this one is
+   * settled.
+   */
+  const prompt = useMemo(() => {
+    const r = queuedRecs[0]
+    if (!r) return null
+    const t = titles[r.title_id]
+    return {
+      id: r.id,
+      title: t || null,
+      name: t?.name || 'A title',
+      meta: t
+        ? [t.year || null, t.type === 'show' ? 'show' : 'film', t.genres?.[0] || null]
+            .filter(Boolean)
+            .join(' · ')
+        : '',
+      from: nameOf(r.sender),
+      note: r.note || '',
+      remaining: queuedRecs.length - 1,
+      deferDays: DEFER_DAYS,
+      onAccept: () => acceptRec(r.id, r.title_id),
+      onIgnore: () => answerRec(r.id, 'ignored'),
+      onDefer: () => deferRec(r.id),
+      // Looking first is not an answer: the recommendation stays open, and
+      // the title screen carries the same three buttons.
+      onOpen: () => {
+        setPeeked((prev) => new Set(prev).add(r.id))
+        openTitle(r.title_id)
+      },
+    }
+  }, [queuedRecs, titles, nameOf, acceptRec, answerRec, deferRec, openTitle])
+
+  /**
+   * Recommendations as the Account tab lists them: the ones you have sent and
+   * are waiting on, and the ones you put off — the only place a deferred
+   * recommendation is reachable before its three days are up.
+   */
+  const recommendRows = useMemo(() => {
+    const row = (r, userId) => ({
+      id: r.id,
+      titleId: r.title_id,
+      name: titleName(r.title_id),
+      username: nameOf(userId),
+      note: r.note || '',
+    })
+    const asking = new Set(queuedRecs.map((r) => r.id))
+    return {
+      waiting: incomingRecs
+        .filter((r) => r.status === 'pending' && !asking.has(r.id))
+        .map((r) => ({ ...row(r, r.sender), deferred: !peeked.has(r.id) })),
+      sent: sentRecs.filter((r) => r.status === 'pending').map((r) => row(r, r.recipient)),
+    }
+  }, [incomingRecs, sentRecs, queuedRecs, peeked, titleName, nameOf])
+
+  /**
+   * Bring one back to the front: it stops being looked away from, and a
+   * deferral is overridden for this session rather than written away — the
+   * reader asked to answer it now, which is not the same as un-deferring it.
+   */
+  const decideRec = useCallback((id) => {
+    setPeeked((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+    setAnswerNow((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+  }, [])
+
+  // The Recommend dialog belongs to the title it was opened from, so leaving
+  // that title closes it rather than carrying it to the next one.
+  const [recommending, setRecommending] = useState(false)
+  useEffect(() => setRecommending(false), [titleId])
+
+  /** The Recommend dialog on a title: one row per friend, with where it stands. */
+  const recommend = useMemo(() => {
+    if (!titleId) return null
+    const mine = sentRecs.filter((r) => r.title_id === titleId)
+    const rows = friends.map((f) => {
+      const r = mine.find((x) => x.recipient === f.userId)
+      return {
+        userId: f.userId,
+        username: f.username,
+        state: !r ? 'none' : r.status === 'pending' ? 'sent' : r.status,
+        recommendationId: r?.id || null,
+      }
+    })
+    return {
+      name: titleName(titleId),
+      rows,
+      noteMax: RECOMMENDATION_NOTE_MAX,
+      onSend: async (friendIds, note) => {
+        const results = await Promise.all(
+          friendIds.map((friendId) =>
+            sendRecommendation(myId, friendId, titleId, note).catch((err) => ({ error: err.message }))
+          )
+        )
+        await refreshSocial()
+        return results.find((r) => r.error)?.error || null
+      },
+      onWithdraw: (id) => dropRec(id),
+    }
+  }, [titleId, sentRecs, friends, titleName, myId, refreshSocial, dropRec])
+
   const account = useMemo(
     () => ({
       email: session?.user?.email ?? null,
@@ -1015,6 +1248,10 @@ export default function App() {
       acceptInvite: (id) => socialAction(() => acceptShare(id)),
       declineInvite: (id) => socialAction(() => dropShare(id)),
       stopSharing: (id) => socialAction(() => endShare(id)),
+      recommendationsWaiting: recommendRows.waiting,
+      recommendationsSent: recommendRows.sent,
+      decideRecommendation: decideRec,
+      withdrawRecommendation: dropRec,
       openTitle,
     }),
     [
@@ -1029,6 +1266,9 @@ export default function App() {
       myId,
       refreshSocial,
       socialAction,
+      recommendRows,
+      decideRec,
+      dropRec,
       openTitle,
     ]
   )
@@ -1303,6 +1543,9 @@ export default function App() {
     const inWatchlist = user.watchlist.includes(t.id)
     const movieWatched = user.watchedMovies.has(t.id)
     const movieStarted = !movieWatched && user.startedMovies.has(t.id)
+    // A recommendation you opened the title to think about is still open, so
+    // the screen carries it: who sent it, and the way back to answering.
+    const openRec = incomingRecs.find((r) => r.title_id === t.id && r.status === 'pending')
 
     return {
       title: t,
@@ -1322,6 +1565,12 @@ export default function App() {
       trailerUrl: t.trailerUrl || null,
       watchlistLabel: inWatchlist ? 'On watchlist — remove' : 'Add to watchlist',
       onWatchlist: () => toggleWatchlist(t.id),
+      // Recommending needs an account with a username, the same as everything
+      // else that names a friend.
+      canRecommend: !!myId && !!profile,
+      onRecommend: () => setRecommending(true),
+      recommendedBy: openRec ? nameOf(openRec.sender) : null,
+      onDecideRecommendation: openRec ? () => decideRec(openRec.id) : null,
       movieWatched,
       movieLabel: movieWatched ? 'Watched — undo' : 'Mark watched',
       onToggleMovie: () => toggleMovie(t.id),
@@ -1370,8 +1619,11 @@ export default function App() {
     titleId,
     openSeasons,
     liveShares,
+    incomingRecs,
     nameOf,
     myId,
+    profile,
+    decideRec,
     toggleWatchlist,
     toggleMovie,
     toggleStarted,
@@ -1583,6 +1835,18 @@ export default function App() {
 
         {loaded && screen === 'account' && <Account account={account} />}
       </div>
+
+      {loaded && recommending && recommend && (
+        <RecommendDialog recommend={recommend} onClose={() => setRecommending(false)} />
+      )}
+
+      {/*
+        An incoming recommendation is a question, so it is asked rather than
+        filed: it comes up over whatever screen you are on, and the next one
+        takes its place once this one is answered. The send dialog holds it
+        back for a moment — two popups at once is neither question answered.
+      */}
+      {loaded && prompt && !recommending && <RecommendationPrompt prompt={prompt} dark={dark} />}
 
       <TabBar tab={tab} onSelect={goTab} />
     </div>

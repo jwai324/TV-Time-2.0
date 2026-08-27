@@ -197,6 +197,37 @@ export default function TitleDetail({ detail, watchTogether, dark, onBack }) {
                   {detail.progressLine}
                 </div>
               )}
+              {detail.recommendedBy && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    flexWrap: 'wrap',
+                    font: "400 11.5px 'IBM Plex Mono', monospace",
+                    color: 'var(--sun)',
+                    marginTop: 8,
+                  }}
+                >
+                  <span>recommended by {detail.recommendedBy}</span>
+                  {detail.onDecideRecommendation && (
+                    <button
+                      className="tl-focus-r6"
+                      onClick={detail.onDecideRecommendation}
+                      style={{
+                        font: "500 11.5px 'Inter Tight', sans-serif",
+                        color: 'var(--aqua)',
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Decide
+                    </button>
+                  )}
+                </div>
+              )}
               {detail.sharedWith.length > 0 && (
                 <div
                   style={{
@@ -225,6 +256,23 @@ export default function TitleDetail({ detail, watchTogether, dark, onBack }) {
                 >
                   {detail.watchlistLabel}
                 </button>
+                {detail.canRecommend && (
+                  <button
+                    className="tl-focus tl-hover-pill"
+                    onClick={detail.onRecommend}
+                    style={{
+                      font: "500 12.5px 'Inter Tight', sans-serif",
+                      color: 'var(--sub)',
+                      background: 'none',
+                      border: '1px solid var(--line)',
+                      borderRadius: 999,
+                      padding: '8px 13px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Recommend
+                  </button>
+                )}
                 {detail.trailerUrl && (
                   <a
                     className="tl-focus tl-hover-pill"

@@ -202,6 +202,36 @@ twice. Pair up on a title and one **Mark watched** counts for both of you.
   same show over together later; that is a new share, and the old one is left
   as it was.
 
+## Recommending a title to a friend
+
+Watching something together is a commitment. Passing something along is not —
+so **Recommend**, on any film or show's screen, is its own thing: it puts the
+title in front of a friend and leaves the decision entirely with them.
+
+- **Sending.** Pick one friend or several, add a note if you want to say why,
+  send. A friend you have already recommended this title to is shown with
+  where it stands rather than hidden — that you already sent it is usually the
+  thing you opened the dialog to find out.
+- **Receiving.** It arrives as a question, over whatever screen you are on:
+  the title, who sent it, their note, and three answers. **Add to watchlist**
+  queues it. **Not for me** closes it. **Ask me in 3 days** puts the question
+  itself off, unchanged, and it comes back when the three days are up.
+- **Nothing lands without a yes.** A recommendation touches your record only
+  when you accept one — which is what makes it safe to send, and safe to
+  receive from someone whose taste you are not sure about.
+- **Looking first is not answering.** *See more about it first* opens the
+  title and steps the prompt aside for the session; the title's screen says
+  who recommended it, with **Decide** to bring the question back.
+- **They arrive one at a time.** Three recommendations at once is a list to
+  get through, not a question to answer, so the prompt asks about the oldest
+  and says how many are behind it.
+- **A deferral is reachable before it is due.** The Account tab lists what you
+  put off and what you have sent that nobody has answered — *Decide now*
+  overrides your own deferral, and *Withdraw* takes back an unanswered one.
+- **An answer is final, a title is not.** Passing on something does not stop a
+  friend recommending it again later; that is a new recommendation, and your
+  old answer stays as it was.
+
 ### How it is put together
 
 Your own record still lives in `user_state` as one jsonb blob. Shared marks do
@@ -217,8 +247,16 @@ makes undo symmetric for free. And pairing up copies nothing, so "start fresh
 from now" is not a rule the client has to enforce — it is just what the data
 already says.
 
-The four tables (`profiles`, `friendships`, `watch_shares`, `shared_marks`),
-their policies and the realtime publication are in
+A recommendation is the same idea pointed one way: `recommendations` holds a
+row both sides can read and only the recipient can answer, so accepting one is
+the recipient's own client adding the title to their own watchlist — never a
+write into someone else's record. Deferring is deliberately not a fourth
+status: the row stays `pending` and `remind_at` says when the question is due
+again, which is why "ask me later" is an open question rather than an answer,
+and why overriding your own deferral needs nothing written at all.
+
+The five tables (`profiles`, `friendships`, `watch_shares`, `shared_marks`,
+`recommendations`), their policies and the realtime publication are in
 [`supabase/migrations`](./supabase/migrations/), applied to the project.
 
 ## Theme
@@ -255,6 +293,20 @@ Driven end to end in Chromium: 57 checks across the first five screens covering
 marking, catch-up, season completion, filters, all three sort orders, search by
 title and by genre, watchlist toggles, rating (including clearing it),
 persistence across a reload, empty states, and the dark theme.
+
+Recommending was driven in Chromium as two signed-in accounts sharing a
+stubbed project — 36 checks: the button on a film and on a show, sending with
+and without a note, the row that write produces, the prompt naming sender and
+note, all three answers (watchlist, pass, defer), that only accepting touches
+the watchlist, that a deferral stays pending with `remind_at` three days out,
+that a deferred one is reachable from the Account tab and *Decide now* brings
+it back, that two waiting arrive oldest-first with the count of what is behind
+it, that *See more about it first* leaves it unanswered and the title screen
+credits the sender, that the sender sees the outcome and can withdraw an
+unanswered one, and the prompt in the dark theme with Escape deferring rather
+than answering. One round-trip is checked in both directions: putting a
+recommendation off, pulling it forward with *Decide now*, and putting it off
+again — the second deferral has to stick rather than re-asking immediately.
 
 Shared watching was verified in three passes. The policies were walked through
 as three signed-in users against the live project — 26 checks covering username
