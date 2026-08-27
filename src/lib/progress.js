@@ -10,32 +10,58 @@ const pad = (n) => String(n).padStart(2, '0')
 /** `S03E06` */
 export const episodeCode = (season, episode) => `S${pad(season)}E${pad(episode)}`
 
-/** The first episode the user has not watched, in air order, or null. */
+/** Every episode of a show in air order, flattened. */
+const inOrder = (title) =>
+  title.seasons.flatMap((s) => s.episodes.map((ep) => ({ season: s.number, episode: ep.number, ep })))
+
+/**
+ * The episode to watch next, or null when there is none.
+ *
+ * Air order, but from the season you are actually watching — the latest one
+ * you have marked anything in. Someone who starts a show at its current
+ * season has not left an unwatched episode behind them; they have decided
+ * where to begin, and "next up" that points at S01E01 is answering a question
+ * they did not ask.
+ *
+ * Seasons behind that one are not forgotten. They become what is left to
+ * watch once the season you are on and everything after it are finished, so
+ * the show still has somewhere to go and still reaches 100%.
+ */
 export function nextUnwatched(title, watchedEpisodes) {
-  for (const s of title.seasons) {
-    for (const ep of s.episodes) {
-      if (!watchedEpisodes.has(episodeKey(title.id, s.number, ep.number))) {
-        return { season: s.number, episode: ep.number, ep }
+  const seen = (season, number) => watchedEpisodes.has(episodeKey(title.id, season, number))
+
+  const firstGap = (seasons) => {
+    for (const s of seasons) {
+      for (const ep of s.episodes) {
+        if (!seen(s.number, ep.number)) return { season: s.number, episode: ep.number, ep }
       }
     }
+    return null
   }
-  return null
+
+  const from = title.seasons.findLastIndex((s) => s.episodes.some((ep) => seen(s.number, ep.number)))
+  if (from < 0) return firstGap(title.seasons)
+  return firstGap(title.seasons.slice(from)) || firstGap(title.seasons)
 }
 
 /**
- * The episode Undo steps back from: the latest watched episode in air order
- * before the first gap — or the final episode when the show is fully watched.
- * Null when nothing is watched before the gap.
+ * The episode Undo steps back from: the latest watched episode before the one
+ * that is next — or the final episode when the show is fully watched. Null
+ * when nothing is watched ahead of it.
+ *
+ * It is defined against `nextUnwatched` rather than against the first gap so
+ * that Undo stays the inverse of Mark. A viewer part-way through the current
+ * season has skipped seasons behind them, and taking back what they just
+ * marked must not depend on a gap they never intended to fill.
  */
 export function lastWatched(title, watchedEpisodes) {
-  let last = null
-  for (const s of title.seasons) {
-    for (const ep of s.episodes) {
-      if (!watchedEpisodes.has(episodeKey(title.id, s.number, ep.number))) return last
-      last = { season: s.number, episode: ep.number, ep }
-    }
+  const all = inOrder(title)
+  const next = nextUnwatched(title, watchedEpisodes)
+  const stop = next ? all.findIndex((e) => e.season === next.season && e.episode === next.episode) : all.length
+  for (let i = stop - 1; i >= 0; i--) {
+    if (watchedEpisodes.has(episodeKey(title.id, all[i].season, all[i].episode))) return all[i]
   }
-  return last
+  return null
 }
 
 /** `{ total, watched }` episode counts across every season. */
