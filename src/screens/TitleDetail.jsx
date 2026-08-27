@@ -300,6 +300,16 @@ export default function TitleDetail({ detail, watchTogether, dark, onBack }) {
               >
                 {detail.movieLabel}
               </button>
+              {detail.onToggleStarted && (
+                <button
+                  className="tl-focus tl-hover-pill"
+                  onClick={detail.onToggleStarted}
+                  aria-pressed={detail.movieStarted}
+                  style={{ ...pillStyle, color: detail.movieStarted ? 'var(--aqua)' : 'var(--sub)' }}
+                >
+                  {detail.startedLabel}
+                </button>
+              )}
               <div style={{ display: 'flex', gap: 2 }} role="radiogroup" aria-label="Rating">
                 {[1, 2, 3, 4, 5].map((n) => {
                   const filled = n <= detail.rating

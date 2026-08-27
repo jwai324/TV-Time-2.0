@@ -18,9 +18,9 @@ npm run preview  # serve the built bundle
 
 | Screen | What it does |
 | --- | --- |
-| **Up Next** | Your queue: shows mid-progress (most recent activity first), then watchlisted shows you haven't started and watchlisted films — each with a one-tap **Mark watched** and an **Undo** that steps back. |
+| **Up Next** | Your queue in two collapsible sections — **Currently watching** over **Start new**, each split into Shows and Movies — with a one-tap **Mark watched** and an **Undo** that steps back. |
 | **Library** | Everything you track, filtered by All / Shows / Movies / Watchlist / Finished and sorted by recent activity (ties broken by the most hours left to watch), title, or progress. |
-| **Title detail** | Poster, synopsis and progress. Shows get season accordions with per-episode checkboxes, **Catch up**, and **Mark season watched**; films get a watched toggle and a five-star rating. |
+| **Title detail** | Poster, synopsis and progress. Shows get season accordions with per-episode checkboxes, **Catch up**, and **Mark season watched**; films get a watched toggle, **Start watching**, and a five-star rating. |
 | **Discover** | TMDB search plus this week's trending row. Watchlist pills throughout. |
 | **Stats** | Hours watched, episodes this month, current streak, titles tracked, and a top-genres chart. |
 | **Account** | Your username, your friends and the requests waiting on them, and every show you are watching with someone. |
@@ -54,6 +54,42 @@ the built app matches the artboard pixel for pixel. Two details worth naming:
   as attributes. Those became one class per state in `index.css`, so each
   element keeps the exact focus-ring offset and radius it was drawn with.
 
+## How Up Next is sorted into sections
+
+The queue is two sections, each split into shows and films:
+
+- **Currently watching** — shows with at least one episode marked, and films
+  you have said you have started.
+- **Start new** — everything else waiting: watchlisted shows you have not
+  begun, and watchlisted films you have not started.
+
+A section folds away by its header and stays folded across reloads, because a
+section you closed is a decision rather than a scroll position. Only the two
+outer sections collapse; Shows and Movies inside one are labels, not another
+thing to tap, so nothing in the queue is ever more than two taps deep. A
+sub-section with nothing in it is left out rather than drawn as an empty box,
+and when the whole queue is empty the "Nothing queued" card stands in for all
+of it.
+
+Sectioning does not reorder anything. Cards keep the order Up Next already
+settled on — most recent activity first, held so nothing reshuffles under your
+thumb — and a caught-up show still sinks within its own sub-section rather
+than to the bottom of the page.
+
+### Films that are under way
+
+A show tells you where you are by its episodes; a film has no such thing, so
+being part-way through one is something you have to say. **Start watching** on
+a film's screen moves it from Start new to Currently watching, and marking it
+watched settles the question and takes the flag off. No percentage is invented
+for a film in progress — nothing here knows how far into it you are — so its
+card says `Watching` where an unstarted film says `Film`, and its tide bar
+stays where it was.
+
+Started films are a private note to yourself: unlike watched films, they are
+not shared with anyone you are watching the film with, because where you got
+to in it is yours.
+
 ## Behaviour carried over verbatim
 
 These are deliberate choices in the design's logic, not accidents, so they are
@@ -64,7 +100,8 @@ reproduced as-is:
   (unaired episodes join the list on their air date), or you un-mark the
   latest one from the title screen.
 - Up Next fixes its order when first built and holds it, so cards never
-  reshuffle while you are working down the list.
+  reshuffle while you are working down the list. Sections re-file a card
+  without moving it relative to its neighbours.
 - A season opens by default when it holds your next unwatched episode — which
   means a season you fully complete closes itself.
 - `episodes this month` counts single-episode activity only; *Catch up* and
@@ -93,8 +130,9 @@ integration.
 
 ## State, storage and sync
 
-Your record — watched episodes, watched films, watchlist, ratings, activity —
-persists to `localStorage` under `tideline.user.v2`. Sets do not survive JSON,
+Your record — watched episodes, watched films, films you have started,
+watchlist, ratings, activity — persists to `localStorage` under
+`tideline.user.v2`. Sets do not survive JSON,
 so they are stored as arrays and rehydrated on read. When storage is
 unavailable (private browsing, a blocked origin), the app says so in a banner
 and runs from memory for the session.
@@ -204,6 +242,14 @@ star rating declares `role="radiogroup"` as the design does, with each star a
 `role="radio"` carrying `aria-checked` so the group is valid to a screen reader.
 
 ## Verification
+
+The sectioned Up Next was driven in Chromium against a stubbed project, with
+one title seeded for each of the four sub-sections: the two sections appear in
+order with the right titles under the right headings, folding one hides its
+cards and leaves the other alone, the fold survives a reload, marking still
+works from inside a section, **Start watching** moves a film from Start new to
+Currently watching, and marking that film watched takes the started flag back
+off.
 
 Driven end to end in Chromium: 57 checks across the first five screens covering
 marking, catch-up, season completion, filters, all three sort orders, search by

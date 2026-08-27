@@ -101,6 +101,7 @@ export function trackedIds(user) {
   const ids = new Set(user.watchlist)
   user.watchedEpisodes.forEach((k) => ids.add(k.split(':')[0]))
   user.watchedMovies.forEach((id) => ids.add(id))
+  user.startedMovies.forEach((id) => ids.add(id))
   Object.keys(user.ratings).forEach((id) => ids.add(id))
   return [...ids]
 }
