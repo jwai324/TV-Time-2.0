@@ -56,7 +56,7 @@ import {
   usernameAvailable,
   usernameProblem,
 } from './lib/social.js'
-import { loadPrefs, persistPrefs } from './lib/prefs.js'
+import { ALWAYS, ASK, loadPrefs, NEVER, persistPrefs } from './lib/prefs.js'
 import { supabase } from './lib/supabase.js'
 import CatchUpPrompt from './components/CatchUpPrompt.jsx'
 import DonationBanner from './components/DonationBanner.jsx'
@@ -895,11 +895,11 @@ export default function App() {
         return
       }
       const behind = unwatchedBeforeEpisode(titles[id], season, episode, effRef.current.watchedEpisodes)
-      if (behind.length && prefs.askPreviousEpisodes) {
+      if (behind.length && prefs.previousEpisodes === ASK) {
         setAskCatchUp({ scope: 'episode', id, season, episode })
         return
       }
-      markEpisode(id, season, episode, false)
+      markEpisode(id, season, episode, behind.length > 0 && prefs.previousEpisodes === ALWAYS)
     },
     [titles, prefs, markEpisode, removeWatched]
   )
@@ -930,11 +930,11 @@ export default function App() {
   const markSeason = useCallback(
     (id, seasonNumber) => {
       const behind = unwatchedBeforeSeason(titles[id], seasonNumber, effRef.current.watchedEpisodes)
-      if (behind.length && prefs.askPreviousSeasons) {
+      if (behind.length && prefs.previousSeasons === ASK) {
         setAskCatchUp({ scope: 'season', id, season: seasonNumber })
         return
       }
-      markSeasonMarks(id, seasonNumber, false)
+      markSeasonMarks(id, seasonNumber, behind.length > 0 && prefs.previousSeasons === ALWAYS)
     },
     [titles, prefs, markSeasonMarks]
   )
@@ -1351,15 +1351,22 @@ export default function App() {
     const seasonsBehind = new Set(behind.map((e) => e.season))
     const done = () => setAskCatchUp(null)
 
-    const common = {
-      name: title.name,
-      ask: scope === 'season' ? prefs.askPreviousSeasons : prefs.askPreviousEpisodes,
-      onToggleAsk: () =>
-        scope === 'season'
-          ? setPref('askPreviousSeasons', !prefs.askPreviousSeasons)
-          : setPref('askPreviousEpisodes', !prefs.askPreviousEpisodes),
-      onCancel: done,
+    /*
+     * One answer, applied now and — when the reader asked for it — kept as the
+     * standing answer to this question. The saved value is the answer itself
+     * rather than a flag, so silencing the dialog on *Yes* keeps catching you
+     * up and silencing it on *No* stops, which is what pressing each of them
+     * meant in the first place.
+     */
+    const answer = (withEarlier, run) => (remember) => {
+      if (remember) {
+        setPref(scope === 'season' ? 'previousSeasons' : 'previousEpisodes', withEarlier ? ALWAYS : NEVER)
+      }
+      run()
+      done()
     }
+
+    const common = { name: title.name, onCancel: done }
 
     if (scope === 'season') {
       return {
@@ -1373,14 +1380,8 @@ export default function App() {
         } still unmarked.`,
         yesLabel: 'Yes — mark those too',
         noLabel: 'No — just this season',
-        onYes: () => {
-          markSeasonMarks(id, season, true)
-          done()
-        },
-        onNo: () => {
-          markSeasonMarks(id, season, false)
-          done()
-        },
+        onYes: answer(true, () => markSeasonMarks(id, season, true)),
+        onNo: answer(false, () => markSeasonMarks(id, season, false)),
       }
     }
 
@@ -1393,16 +1394,10 @@ export default function App() {
       )} in season ${season} ${behind.length === 1 ? 'is' : 'are'} still unmarked.`,
       yesLabel: 'Yes — mark those too',
       noLabel: 'No — just this episode',
-      onYes: () => {
-        markEpisode(id, season, episode, true)
-        done()
-      },
-      onNo: () => {
-        markEpisode(id, season, episode, false)
-        done()
-      },
+      onYes: answer(true, () => markEpisode(id, season, episode, true)),
+      onNo: answer(false, () => markEpisode(id, season, episode, false)),
     }
-  }, [askCatchUp, user, titles, prefs, setPref, markSeasonMarks, markEpisode])
+  }, [askCatchUp, user, titles, setPref, markSeasonMarks, markEpisode])
 
   // A question that answered itself — the gap behind the mark closed while it
   // was open — is put down rather than left half-held.

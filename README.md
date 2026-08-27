@@ -116,14 +116,29 @@ sweep already has a button: **Catch up**, which marks an episode and
 everything before it across every season, and does not ask, because asking for
 it is what pressing it means.
 
-Each dialog carries a **Don't ask this again** switch. It takes effect the
-moment it is pressed and applies to that question only, so silencing the
-episode prompt leaves the season prompt asking. Both switches live under
-**Account · Prompts** and can be turned back on there at any time — which is
-the deal that makes a "don't ask this again" safe to press. They are settings
-of the device rather than of the account (nothing about them is watch history,
-so nothing about them needs to sync), stored in `localStorage` under
-`tideline.prefs.v1` alongside the folded Up Next sections.
+Each dialog carries a **Don't ask this again** switch, and what it saves is
+your answer — not merely the fact that you are done being asked. Turning a
+question off is not the same as answering it no: someone who always watches in
+order silences the prompt on *Yes* and wants every later mark to catch up
+behind it, and someone who never does silences it on *No*. So the switch arms
+the dialog rather than acting on it, and the button you then press becomes the
+standing answer, applied without asking the next time the same thing comes up.
+
+Nothing is written until you answer, which is why dismissing an armed dialog
+leaves the setting exactly as it was. Each question is remembered separately,
+so silencing the episode prompt leaves the season prompt asking.
+
+Both answers live under **Account · Prompts** as three choices — *Ask*,
+*Always mark*, *Never mark* — which is the deal that makes a "don't ask this
+again" safe to press: the setting shows what you silenced the question *into*,
+not just that you silenced it, and any of the three can be picked back. They
+are settings of the device rather than of the account (nothing about them is
+watch history, so nothing about them needs to sync), stored in `localStorage`
+under `tideline.prefs.v1` alongside the folded Up Next sections. That key held
+a pair of booleans before an answer could be remembered; `false` meant "stop
+asking", and stopping could only mean marking the one thing you ticked, so it
+migrates to *Never mark* and a reader who silenced a prompt keeps the
+behaviour they silenced it into.
 
 Dismissing a catch-up dialog — Escape, or a tap outside it — cancels the mark
 outright rather than picking an answer for you. Nothing has been written at
@@ -207,9 +222,10 @@ integration.
 
 Your record — watched episodes, watched films, films you have started,
 watchlist, ratings, activity — persists to `localStorage` under
-`tideline.user.v2`. Device preferences (whether each catch-up prompt still
-asks) sit apart from it under `tideline.prefs.v1`, because they describe this
-browser rather than your viewing. Sets do not survive JSON,
+`tideline.user.v2`. Device preferences (whether each catch-up prompt asks, and
+the answer standing for it if not) sit apart from it under
+`tideline.prefs.v1`, because they describe this browser rather than your
+viewing. Sets do not survive JSON,
 so they are stored as arrays and rehydrated on read. When storage is
 unavailable (private browsing, a blocked origin), the app says so in a banner
 and runs from memory for the session.
@@ -386,10 +402,14 @@ show: **Mark season watched** on season 3 raises the season question naming
 the right gap (6 episodes across 2 earlier seasons), *No* marks that season
 alone (3 of 9), ticking S01E03 raises the episode question scoped to its own
 season (2 earlier episodes in season 1), *Yes* fills the season in (6 of 9),
-**Don't ask this again** persists the moment it is pressed and the next
-episode tick marks straight through without asking (7 of 9), and the switch
-under **Account · Prompts** turns it back on. Up Next reads *Haven't started
-yet* and no longer says *Start new*.
+and **Don't ask this again** followed by an answer saves that answer: armed
+and answered *Yes*, a later season mark with three seasons behind it sweeps
+straight to 12 of 12 with no dialog; armed and answered *No*, the next episode
+tick marks only itself while the season question still asks. Dismissing an
+armed dialog writes nothing and marks nothing. A v1 boolean of `false`
+migrates to *Never mark*. **Account · Prompts** shows the standing answer for
+each question and choosing *Ask* brings the dialog back. Up Next reads
+*Haven't started yet* and no longer says *Start new*.
 
 The sectioned Up Next was driven in Chromium against a stubbed project, with
 one title seeded for each of the four sub-sections: the two sections appear in

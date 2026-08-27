@@ -492,53 +492,85 @@ function Recommendations({ account, say }) {
   )
 }
 
+const PROMPT_ROWS = [
+  {
+    key: 'previousSeasons',
+    primary: 'Previous seasons',
+    secondary: 'marking a season watched with earlier seasons unwatched',
+  },
+  {
+    key: 'previousEpisodes',
+    primary: 'Previous episodes',
+    secondary: 'ticking an episode with earlier ones in that season unwatched',
+  },
+]
+
+const PROMPT_CHOICES = [
+  { value: 'ask', label: 'Ask' },
+  { value: 'always', label: 'Always mark' },
+  { value: 'never', label: 'Never mark' },
+]
+
 /**
- * The questions the app asks while you mark things off, and whether it still
- * asks them.
+ * The questions the app asks while you mark things off, and what it does
+ * instead of asking.
  *
  * Every "don't ask this again" in the app lands here, which is the deal that
  * makes such a button safe to press: turning a prompt off is never the last
- * word on it. These are settings of the device rather than of the account, so
- * the section stands whether or not anyone is signed in.
+ * word on it. Each question shows the answer standing for it, so a reader who
+ * silenced one can see what they silenced it into rather than only that they
+ * did. These are settings of the device rather than of the account, so the
+ * section stands whether or not anyone is signed in.
  */
 function Prompts({ account }) {
-  const rows = [
-    {
-      key: 'askPreviousSeasons',
-      primary: 'Ask about previous seasons',
-      secondary: 'when you mark a season watched with earlier seasons unwatched',
-    },
-    {
-      key: 'askPreviousEpisodes',
-      primary: 'Ask about previous episodes',
-      secondary: 'when you tick an episode with earlier ones in the season unwatched',
-    },
-  ]
-
   return (
     <>
-      {rows.map((row) => {
-        const on = !!account.prefs[row.key]
+      {PROMPT_ROWS.map((row) => {
+        const current = account.prefs[row.key]
         return (
-          <Row
-            key={row.key}
-            primary={row.primary}
-            secondary={row.secondary}
-            actions={
-              <button
-                className="tl-focus tl-hover-pill"
-                role="switch"
-                aria-checked={on}
-                aria-label={row.primary}
-                onClick={() => account.setPref(row.key, !on)}
-                style={on ? { ...quietButton, color: 'var(--aqua)', borderColor: 'var(--aqua)' } : quietButton}
-              >
-                {on ? 'On' : 'Off'}
-              </button>
-            }
-          />
+          <div key={row.key} style={{ padding: '8px 0' }}>
+            <div style={{ font: "500 13.5px 'Inter Tight', sans-serif" }}>{row.primary}</div>
+            <div
+              style={{
+                font: "400 11px 'IBM Plex Mono', monospace",
+                color: 'var(--drift)',
+                marginTop: 4,
+                textWrap: 'pretty',
+              }}
+            >
+              {row.secondary}
+            </div>
+            <div
+              role="radiogroup"
+              aria-label={row.primary}
+              style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}
+            >
+              {PROMPT_CHOICES.map((choice) => {
+                const on = current === choice.value
+                return (
+                  <button
+                    key={choice.value}
+                    className="tl-focus tl-hover-pill"
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => account.setPref(row.key, choice.value)}
+                    style={
+                      on ? { ...quietButton, color: 'var(--aqua)', borderColor: 'var(--aqua)' } : quietButton
+                    }
+                  >
+                    {choice.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         )
       })}
+
+      <div style={{ ...mutedStyle, marginTop: 10 }}>
+        <strong style={{ fontWeight: 500 }}>Always mark</strong> catches the earlier ones up with whatever you
+        tick. <strong style={{ fontWeight: 500 }}>Never mark</strong> marks only what you ticked.
+      </div>
     </>
   )
 }
