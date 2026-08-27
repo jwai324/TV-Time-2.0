@@ -1,8 +1,8 @@
 /**
  * The single user record Tideline tracks, and its localStorage round-trip.
  *
- * Sets do not survive JSON, so `watchedEpisodes` and `watchedMovies` are stored
- * as arrays and rehydrated on the way back in.
+ * Sets do not survive JSON, so `watchedEpisodes`, `watchedMovies` and
+ * `startedMovies` are stored as arrays and rehydrated on the way back in.
  */
 
 // v2: the v1 records referenced the fictional demo catalog's ids, which no
@@ -16,6 +16,7 @@ export const episodeKey = (titleId, season, episode) => `${titleId}:${season}:${
 export const serializeUser = (user) => ({
   watchedEpisodes: [...user.watchedEpisodes],
   watchedMovies: [...user.watchedMovies],
+  startedMovies: [...user.startedMovies],
   watchlist: user.watchlist,
   ratings: user.ratings,
   lastActivity: user.lastActivity,
@@ -25,6 +26,7 @@ export const serializeUser = (user) => ({
 export const reviveUser = (p) => ({
   watchedEpisodes: new Set(p.watchedEpisodes || []),
   watchedMovies: new Set(p.watchedMovies || []),
+  startedMovies: new Set(p.startedMovies || []),
   watchlist: p.watchlist || [],
   ratings: p.ratings || {},
   lastActivity: p.lastActivity || [],
@@ -34,6 +36,7 @@ export const reviveUser = (p) => ({
 export const emptyUser = () => ({
   watchedEpisodes: new Set(),
   watchedMovies: new Set(),
+  startedMovies: new Set(),
   watchlist: [],
   ratings: {},
   lastActivity: [],
@@ -74,6 +77,7 @@ export function persistUser(user, { freshStart = false } = {}) {
 export const cloneUser = (u) => ({
   watchedEpisodes: new Set(u.watchedEpisodes),
   watchedMovies: new Set(u.watchedMovies),
+  startedMovies: new Set(u.startedMovies),
   watchlist: [...u.watchlist],
   ratings: { ...u.ratings },
   lastActivity: [...u.lastActivity],

@@ -75,6 +75,24 @@ const writePendingUsername = (value) => {
   }
 }
 
+const COLLAPSED_KEY = 'tideline.upnext.collapsed'
+
+const readCollapsed = () => {
+  try {
+    return JSON.parse(localStorage.getItem(COLLAPSED_KEY)) || {}
+  } catch {
+    return {}
+  }
+}
+
+const writeCollapsed = (value) => {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify(value))
+  } catch {
+    /* memory-only session; the sections just reopen next time */
+  }
+}
+
 const markSig = (m) => `${m.share_id}:${m.kind}:${m.key}`
 const sameMark = (a, b) => a.share_id === b.share_id && a.kind === b.kind && a.key === b.key
 
@@ -190,6 +208,9 @@ export default function App() {
   const [searched, setSearched] = useState(false)
 
   const [openSeasons, setOpenSeasons] = useState({})
+  // Which Up Next sections are folded away. Kept across reloads, because a
+  // section you closed is a decision, not a scroll position.
+  const [collapsed, setCollapsed] = useState(readCollapsed)
   const [anim, setAnim] = useState({})
   // Cards pinned on screen mid-interaction: a show marked to completion, or
   // undone back to zero watched, stays put instead of vanishing under the tap.
@@ -674,6 +695,30 @@ export default function App() {
     [anim, titles, removeWatched, later]
   )
 
+  /**
+   * Films are the one thing here with no natural halfway point — a show tells
+   * you where you are by its episodes, a film does not. Saying you have
+   * started one is what puts it under Currently watching rather than Start
+   * new; finishing it settles the question, so the flag comes off.
+   */
+  const toggleStarted = useCallback(
+    (id) => {
+      mutate((u) => {
+        if (u.startedMovies.has(id)) u.startedMovies.delete(id)
+        else u.startedMovies.add(id)
+      })
+    },
+    [mutate]
+  )
+
+  const settleMovie = useCallback(
+    (id) => {
+      if (!userRef.current.startedMovies.has(id)) return
+      mutate((u) => u.startedMovies.delete(id))
+    },
+    [mutate]
+  )
+
   /** Mark a queued film watched from Up Next; the card leaves the queue. */
   const markMovieNext = useCallback(
     (id) => {
@@ -682,12 +727,13 @@ export default function App() {
       setAnim((a) => ({ ...a, [id]: 'out' }))
       later(() => {
         addWatched(id, [{ kind: 'movie', key: id }], 'Watched')
+        settleMovie(id)
         setPinned((f) => (f[id] ? { ...f, [id]: false } : f))
         setAnim((a) => ({ ...a, [id]: 'in' }))
         later(() => setAnim((a) => ({ ...a, [id]: null })), 40)
       }, 190)
     },
-    [anim, addWatched, later]
+    [anim, addWatched, settleMovie, later]
   )
 
   const toggleEpisode = useCallback(
@@ -732,9 +778,12 @@ export default function App() {
   const toggleMovie = useCallback(
     (id) => {
       if (effRef.current.watchedMovies.has(id)) removeWatched(id, { kind: 'movie', key: id }, 'Watched')
-      else addWatched(id, [{ kind: 'movie', key: id }], 'Watched')
+      else {
+        addWatched(id, [{ kind: 'movie', key: id }], 'Watched')
+        settleMovie(id)
+      }
     },
-    [addWatched, removeWatched]
+    [addWatched, removeWatched, settleMovie]
   )
 
   const rate = useCallback(
@@ -1024,7 +1073,10 @@ export default function App() {
     return Object.values(titles).filter((t) => {
       if (t.partial) return false
       if (pinned[t.id]) return true
-      const queued = user.watchlist.includes(t.id) || sharedTitleIds.has(t.id)
+      // Saying you have started a film queues it, the same as watchlisting it —
+      // otherwise Start watching would move it into a section it cannot reach.
+      const queued =
+        user.watchlist.includes(t.id) || sharedTitleIds.has(t.id) || user.startedMovies.has(t.id)
       if (t.type === 'show') {
         const watched = counts(t, user.watchedEpisodes).watched
         if (watched > 0) return pctOf(t, user) < 100
@@ -1083,13 +1135,19 @@ export default function App() {
 
         if (title.type === 'movie') {
           const watched = user.watchedMovies.has(id)
+          const started = !watched && user.startedMovies.has(id)
           return {
             id,
             title,
             name: title.name,
+            group: watched || started ? 'watching' : 'new',
+            kind: 'movie',
             done: watched,
             doneLabel: 'Watched',
-            code: 'Film',
+            // A film has no episode to name, so the line says where you are
+            // with it instead. No percentage is invented for a started film —
+            // nothing here knows how far in you are.
+            code: started ? 'Watching' : 'Film',
             epName: '',
             rt: `${title.runtimeMinutes} min`,
             pct: watched ? 100 : 0,
@@ -1103,10 +1161,13 @@ export default function App() {
           }
         }
 
+        const watchedCount = counts(title, user.watchedEpisodes).watched
         return {
           id,
           title,
           name: title.name,
+          group: watchedCount > 0 ? 'watching' : 'new',
+          kind: 'show',
           done: !next,
           doneLabel: 'All caught up',
           code: next ? episodeCode(next.season, next.episode) : '',
@@ -1123,6 +1184,38 @@ export default function App() {
         }
       })
   }, [queue, titles, user, anim, markNext, markMovieNext, undoLast, openTitle])
+
+  /*
+   * Up Next in two halves: what you are part-way through, then what is
+   * waiting to be started — each split into shows and films.
+   *
+   * The order inside a group is the order `cards` already settled on, so
+   * sectioning re-files a card without moving it relative to its neighbours,
+   * and an empty group is dropped rather than drawn as an empty box.
+   */
+  const sections = useMemo(() => {
+    const pick = (group, kind) => cards.filter((c) => c.group === group && c.kind === kind)
+    return [
+      { key: 'watching', label: 'Currently watching' },
+      { key: 'new', label: 'Start new' },
+    ]
+      .map(({ key, label }) => {
+        const groups = [
+          { key: `${key}-shows`, label: 'Shows', cards: pick(key, 'show') },
+          { key: `${key}-movies`, label: 'Movies', cards: pick(key, 'movie') },
+        ].filter((g) => g.cards.length > 0)
+        return { key, label, groups, count: groups.reduce((n, g) => n + g.cards.length, 0) }
+      })
+      .filter((section) => section.count > 0)
+  }, [cards])
+
+  const toggleSection = useCallback((key) => {
+    setCollapsed((prev) => {
+      const next = { ...prev, [key]: !prev[key] }
+      writeCollapsed(next)
+      return next
+    })
+  }, [])
 
   const tracked = useMemo(() => {
     if (!user) return []
@@ -1209,6 +1302,7 @@ export default function App() {
     const c = isShow ? counts(t, user.watchedEpisodes) : null
     const inWatchlist = user.watchlist.includes(t.id)
     const movieWatched = user.watchedMovies.has(t.id)
+    const movieStarted = !movieWatched && user.startedMovies.has(t.id)
 
     return {
       title: t,
@@ -1231,6 +1325,10 @@ export default function App() {
       movieWatched,
       movieLabel: movieWatched ? 'Watched — undo' : 'Mark watched',
       onToggleMovie: () => toggleMovie(t.id),
+      movieStarted,
+      // Hidden once the film is watched: there is nothing left to start.
+      startedLabel: movieStarted ? 'Watching — undo' : 'Start watching',
+      onToggleStarted: movieWatched ? null : () => toggleStarted(t.id),
       rating: user.ratings[t.id] || 0,
       onRate: (n) => rate(t.id, n),
       seasons: isShow
@@ -1276,6 +1374,7 @@ export default function App() {
     myId,
     toggleWatchlist,
     toggleMovie,
+    toggleStarted,
     rate,
     markSeason,
     toggleEpisode,
@@ -1433,7 +1532,14 @@ export default function App() {
         )}
 
         {loaded && screen === 'upnext' && (
-          <UpNext cards={cards} dark={dark} onDiscover={() => goTab('discover')} />
+          <UpNext
+            sections={sections}
+            collapsed={collapsed}
+            onToggleSection={toggleSection}
+            empty={cards.length === 0}
+            dark={dark}
+            onDiscover={() => goTab('discover')}
+          />
         )}
 
         {loaded && screen === 'library' && (
