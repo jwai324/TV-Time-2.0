@@ -1,7 +1,148 @@
+import { useState } from 'react'
+
 import Poster from '../components/Poster.jsx'
 import TideBar from '../components/TideBar.jsx'
 
-export default function TitleDetail({ detail, dark, onBack }) {
+const pillStyle = {
+  font: "500 12.5px 'Inter Tight', sans-serif",
+  color: 'var(--sub)',
+  background: 'none',
+  border: '1px solid var(--line)',
+  borderRadius: 999,
+  padding: '8px 13px',
+  cursor: 'pointer',
+  minHeight: 38,
+}
+
+/**
+ * Watch together: one row per friend, in whichever of the four states you are
+ * in with them on this title.
+ *
+ * The state a row is in is the whole explanation of what the button does, so
+ * each one says it rather than relying on an icon: invited and waiting,
+ * asked and able to answer, already watching, or neither yet.
+ */
+function WatchTogether({ watchTogether }) {
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+
+  if (!watchTogether || !watchTogether.signedIn || !watchTogether.hasUsername) return null
+
+  const act = (fn) => async () => {
+    setBusy(true)
+    setMessage('')
+    const err = await fn()
+    setBusy(false)
+    setMessage(err || '')
+  }
+
+  const { rows } = watchTogether
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <div
+        style={{
+          font: "400 11px 'IBM Plex Mono', monospace",
+          color: 'var(--drift)',
+          textTransform: 'uppercase',
+          letterSpacing: '.08em',
+          marginBottom: 10,
+        }}
+      >
+        Watch together
+      </div>
+
+      {!rows.length && (
+        <div style={{ font: "400 12.5px 'Inter Tight', sans-serif", color: 'var(--sub)' }}>
+          Add a friend on the Account tab, then you can watch this one together.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {rows.map((row) => (
+          <div key={row.userId} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ font: "500 13.5px 'Inter Tight', sans-serif", overflowWrap: 'anywhere' }}>
+                {row.username}
+              </div>
+              {row.state !== 'none' && (
+                <div style={{ font: "400 11px 'IBM Plex Mono', monospace", color: 'var(--drift)', marginTop: 3 }}>
+                  {row.state === 'watching'
+                    ? 'marks either of you make count for both'
+                    : row.state === 'invited'
+                      ? 'invited — waiting on them'
+                      : 'asked to watch this with you'}
+                </div>
+              )}
+            </div>
+
+            {row.state === 'none' && (
+              <button
+                className="tl-focus tl-hover-pill"
+                disabled={busy}
+                onClick={act(() => watchTogether.onInvite(row.userId))}
+                style={pillStyle}
+              >
+                Invite
+              </button>
+            )}
+            {row.state === 'invited' && (
+              <button
+                className="tl-focus tl-hover-pill"
+                disabled={busy}
+                onClick={act(() => watchTogether.onDecline(row.shareId))}
+                style={pillStyle}
+              >
+                Withdraw
+              </button>
+            )}
+            {row.state === 'asked' && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="tl-focus tl-hover-pill"
+                  disabled={busy}
+                  onClick={act(() => watchTogether.onAccept(row.shareId))}
+                  style={{ ...pillStyle, color: 'var(--aqua)', borderColor: 'var(--aqua)' }}
+                >
+                  Accept
+                </button>
+                <button
+                  className="tl-focus tl-hover-pill"
+                  disabled={busy}
+                  onClick={act(() => watchTogether.onDecline(row.shareId))}
+                  style={pillStyle}
+                >
+                  Decline
+                </button>
+              </div>
+            )}
+            {row.state === 'watching' && (
+              <button
+                className="tl-focus tl-hover-pill"
+                disabled={busy}
+                onClick={act(() => watchTogether.onStop(row.shareId))}
+                style={pillStyle}
+              >
+                Stop
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {message && (
+        <div
+          role="status"
+          style={{ font: "400 11.5px 'IBM Plex Mono', monospace", color: 'var(--sub)', marginTop: 10 }}
+        >
+          {message}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function TitleDetail({ detail, watchTogether, dark, onBack }) {
   return (
     <>
       <div style={{ padding: '16px 20px 0' }}>
@@ -54,6 +195,17 @@ export default function TitleDetail({ detail, dark, onBack }) {
                   }}
                 >
                   {detail.progressLine}
+                </div>
+              )}
+              {detail.sharedWith.length > 0 && (
+                <div
+                  style={{
+                    font: "400 11.5px 'IBM Plex Mono', monospace",
+                    color: 'var(--aqua)',
+                    marginTop: 8,
+                  }}
+                >
+                  watching with {detail.sharedWith.join(', ')}
                 </div>
               )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
@@ -118,6 +270,8 @@ export default function TitleDetail({ detail, dark, onBack }) {
           >
             {detail.overview}
           </p>
+
+          <WatchTogether watchTogether={watchTogether} />
 
           {detail.isMovie && (
             <div

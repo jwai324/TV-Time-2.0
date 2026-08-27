@@ -13,6 +13,7 @@ import {
   wash,
 } from './lib/progress.js'
 import {
+  applyMark,
   cloneUser,
   episodeKey,
   fetchRemoteUser,
@@ -20,7 +21,31 @@ import {
   persistUser,
   pushRemoteUser,
   recordActivity,
+  recordSharedActivity,
+  unapplyMark,
+  withSharedMarks,
+  withdrawActivity,
 } from './lib/user.js'
+import {
+  acceptFriendRequest,
+  acceptShare,
+  addMarks,
+  claimUsername,
+  dropShare,
+  endShare,
+  fetchFriendships,
+  fetchMarks,
+  fetchProfile,
+  fetchProfiles,
+  fetchShares,
+  inviteToWatch,
+  removeFriendship,
+  removeMark,
+  sendFriendRequest,
+  subscribeSocial,
+  usernameAvailable,
+  usernameProblem,
+} from './lib/social.js'
 import { supabase } from './lib/supabase.js'
 import TabBar from './components/TabBar.jsx'
 import UpNext from './screens/UpNext.jsx'
@@ -28,6 +53,32 @@ import Library from './screens/Library.jsx'
 import TitleDetail from './screens/TitleDetail.jsx'
 import Discover from './screens/Discover.jsx'
 import Stats from './screens/Stats.jsx'
+import Account from './screens/Account.jsx'
+
+/** A username typed at sign-up outlives the round-trip to the confirmation email. */
+const PENDING_USERNAME_KEY = 'tideline.pendingUsername'
+
+const readPendingUsername = () => {
+  try {
+    return localStorage.getItem(PENDING_USERNAME_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+const writePendingUsername = (value) => {
+  try {
+    if (value) localStorage.setItem(PENDING_USERNAME_KEY, value)
+    else localStorage.removeItem(PENDING_USERNAME_KEY)
+  } catch {
+    /* memory-only session; the username can be claimed by hand instead */
+  }
+}
+
+const markSig = (m) => `${m.share_id}:${m.kind}:${m.key}`
+const sameMark = (a, b) => a.share_id === b.share_id && a.kind === b.kind && a.key === b.key
+
+const EMPTY_SOCIAL = { friendships: [], shares: [], names: {}, marks: [] }
 
 /**
  * The design carries `darkMode` and `freshStart` as editor props with no UI
@@ -67,14 +118,60 @@ export default function App() {
   const [titles, setTitles] = useState({})
   const [collections, setCollections] = useState({})
 
-  // `user` is mirrored into a ref so an action can read the value a previous
+  // `rawUser` is mirrored into a ref so an action can read the value a previous
   // action just wrote, without waiting for a re-render.
   const userRef = useRef(null)
-  const [user, setUserState] = useState(null)
+  const [rawUser, setUserState] = useState(null)
   const setUser = useCallback((next) => {
     userRef.current = next
     setUserState(next)
   }, [])
+
+  // Friends, the shows you are watching with them, and the marks those shows
+  // carry. `names` maps an account id to its username.
+  const [profile, setProfile] = useState(null)
+  const [social, setSocial] = useState(EMPTY_SOCIAL)
+  const socialRef = useRef(social)
+  socialRef.current = social
+
+  const myId = session?.user?.id ?? null
+
+  /** The shares that are live: accepted, so marks flow both ways. */
+  const liveShares = useMemo(
+    () => social.shares.filter((sh) => sh.status === 'accepted'),
+    [social.shares]
+  )
+
+  /** The marks those shares carry — the half of your record you share. */
+  const liveMarks = useMemo(() => {
+    const live = new Set(liveShares.map((sh) => sh.id))
+    return social.marks.filter((m) => live.has(m.share_id))
+  }, [liveShares, social.marks])
+
+  // A show you are watching with a friend is tracked from the moment you pair
+  // up on it, the same as one you have put on your watchlist.
+  const sharedTitleIds = useMemo(() => new Set(liveShares.map((sh) => sh.title_id)), [liveShares])
+
+  /*
+   * What every screen reads: your own record with the marks of your live
+   * shares folded in. Your record itself is never written by anyone else, so
+   * marking an episode of a shared show reaches your friend as a row here,
+   * not as an edit to their account.
+   */
+  const user = useMemo(() => (rawUser ? withSharedMarks(rawUser, liveMarks) : null), [rawUser, liveMarks])
+  const effRef = useRef(null)
+  effRef.current = user
+
+  const marksRef = useRef(social.marks)
+  marksRef.current = social.marks
+
+  const setMarks = useCallback((fn) => setSocial((prev) => ({ ...prev, marks: fn(prev.marks) })), [])
+
+  /** The live share on a title, or null when it is yours alone. */
+  const liveShareOf = useCallback(
+    (id) => socialRef.current.shares.find((sh) => sh.status === 'accepted' && sh.title_id === id) || null,
+    []
+  )
 
   const [screen, setScreen] = useState('upnext')
   const [tab, setTab] = useState('upnext')
@@ -148,6 +245,162 @@ export default function App() {
     })()
   }, [loaded, session, freshStart, setUser])
 
+  // The username, once there is an account to hang it on. A username typed at
+  // sign-up is claimed here, after the confirmation round-trip brings a
+  // session back.
+  useEffect(() => {
+    if (!session) {
+      setProfile(null)
+      setSocial(EMPTY_SOCIAL)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        let mine = await fetchProfile(session.user.id)
+        const pending = readPendingUsername()
+        if (!mine && pending) {
+          mine = await claimUsername(session.user.id, pending).catch(() => null)
+          if (mine) writePendingUsername('')
+        }
+        if (!cancelled) setProfile(mine)
+      } catch {
+        if (!cancelled) setProfile(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [session])
+
+  /** Re-read friends, shares and marks. Every social action ends here. */
+  const refreshSocial = useCallback(async () => {
+    const s = sessionRef.current
+    if (!s) {
+      setSocial(EMPTY_SOCIAL)
+      return
+    }
+    try {
+      const [friendships, shares] = await Promise.all([fetchFriendships(), fetchShares()])
+      const ids = new Set()
+      friendships.forEach((f) => {
+        ids.add(f.requester)
+        ids.add(f.addressee)
+      })
+      shares.forEach((sh) => {
+        ids.add(sh.inviter)
+        ids.add(sh.invitee)
+      })
+      ids.delete(s.user.id)
+      // Marks are read for ended shares too — that is what lets each side
+      // keep its own copy of what you watched together.
+      const [names, marks] = await Promise.all([
+        fetchProfiles([...ids]),
+        fetchMarks(shares.filter((sh) => sh.status !== 'pending').map((sh) => sh.id)),
+      ])
+      setSocial({ friendships, shares, names, marks })
+      setSyncFailed(false)
+    } catch {
+      setSyncFailed(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!profile) return
+    refreshSocial()
+  }, [profile, refreshSocial])
+
+  /*
+   * A friend's mark should land while you are both watching, not on next
+   * load. Marks arrive already applied; anything else about the friendship
+   * just triggers a re-read.
+   */
+  useEffect(() => {
+    if (!myId || !profile) return
+    const shareIds = liveShares.map((sh) => sh.id)
+    return subscribeSocial({
+      userId: myId,
+      shareIds,
+      onMarks: (payload) => {
+        if (payload.eventType === 'DELETE') {
+          const gone = payload.old
+          if (!gone?.share_id) return
+          setMarks((prev) => prev.filter((m) => !sameMark(m, gone)))
+        } else if (payload.new) {
+          const row = payload.new
+          setMarks((prev) => (prev.some((m) => sameMark(m, row)) ? prev : [...prev, row]))
+        }
+      },
+      onSocial: () => refreshSocial(),
+    })
+  }, [myId, profile, liveShares, refreshSocial, setMarks])
+
+  /*
+   * Realtime is the fast path, not the only one. A socket that was asleep,
+   * blocked or dropped would otherwise leave a friend's marks unseen until a
+   * reload, so coming back to the app re-reads them too.
+   */
+  useEffect(() => {
+    if (!profile) return
+    const refresh = () => {
+      if (document.visibilityState === 'visible') refreshSocial()
+    }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [profile, refreshSocial])
+
+  /*
+   * A share that has ended stops being shared and starts being yours: its
+   * marks are folded into your own record, once, and remembered so they are
+   * not folded in again. The other side does the same on their next load, so
+   * neither of you loses an episode when you stop watching together.
+   */
+  useEffect(() => {
+    if (!loaded || !rawUser || !myId || freshStart) return
+    const ended = social.shares.filter(
+      (sh) => sh.status === 'ended' && !rawUser.materializedShares.includes(sh.id)
+    )
+    if (!ended.length) return
+    const ids = new Set(ended.map((sh) => sh.id))
+    mutate((u) => {
+      social.marks.filter((m) => ids.has(m.share_id)).forEach((m) => applyMark(u, m))
+      ended.forEach((sh) => u.materializedShares.push(sh.id))
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, rawUser, myId, freshStart, social.shares, social.marks])
+
+  /*
+   * A friend marking an episode makes it watched for you, so it belongs in
+   * your activity too — that is what orders Up Next and feeds the streak.
+   * Marks you made yourself were logged when you made them.
+   */
+  useEffect(() => {
+    if (!loaded || !rawUser || !myId) return
+    const logged = new Set(rawUser.lastActivity.map((a) => a.sk).filter(Boolean))
+    const fresh = liveMarks.filter(
+      (m) => m.kind === 'episode' && m.marked_by !== myId && !logged.has(markSig(m))
+    )
+    if (!fresh.length) return
+    const entries = fresh
+      .map((m) => {
+        const [id, season, episode] = m.key.split(':')
+        return {
+          ts: new Date(m.marked_at).getTime(),
+          titleId: id,
+          label: episodeCode(Number(season), Number(episode)),
+          sk: markSig(m),
+        }
+      })
+      .filter((e) => Number.isFinite(e.ts))
+    if (!entries.length) return
+    mutate((u) => recordSharedActivity(u, entries))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, rawUser, myId, liveMarks])
+
   // Load the user, then resolve every title they have a relationship with.
   useEffect(() => {
     let cancelled = false
@@ -200,6 +453,9 @@ export default function App() {
     if (!loaded || !user) return
     const need = new Set(trackedIds(user))
     user.lastActivity.forEach((a) => need.add(a.titleId))
+    // A show a friend has invited you to watch has to be resolvable before
+    // you have marked anything on it — the invitation names it.
+    social.shares.forEach((sh) => need.add(sh.title_id))
     const missing = [...need].filter((id) => {
       const t = titles[id]
       return (!t || t.partial) && !titleFetches.current.has(id)
@@ -217,7 +473,7 @@ export default function App() {
         return merged
       })
     })
-  }, [loaded, user, titles])
+  }, [loaded, user, titles, social.shares])
 
   /** Apply a mutation to a fresh copy of the user, then persist it. */
   const mutate = useCallback(
@@ -234,6 +490,77 @@ export default function App() {
       }
     },
     [freshStart, setUser]
+  )
+
+  /**
+   * Add marks to a title: to the share when you are watching it with someone,
+   * to your own record when you are not.
+   *
+   * A shared mark is written optimistically so the tide bar moves under your
+   * thumb, and withdrawn again if the write does not land. The activity entry
+   * stays yours either way — your friend logs their own when the mark reaches
+   * them.
+   */
+  const addWatched = useCallback(
+    (id, entries, label) => {
+      const share = liveShareOf(id)
+      if (!share) {
+        mutate((u) => {
+          entries.forEach((e) => applyMark(u, e))
+          if (label) recordActivity(u, id, label)
+        })
+        return
+      }
+
+      const now = new Date().toISOString()
+      const rows = entries
+        .map((e) => ({ share_id: share.id, kind: e.kind, key: e.key, marked_by: myId, marked_at: now }))
+        .filter((row) => !marksRef.current.some((m) => sameMark(m, row)))
+      if (!rows.length) return
+
+      setMarks((prev) => [...prev, ...rows])
+      if (label) mutate((u) => recordActivity(u, id, label))
+      addMarks(share.id, myId, entries)
+        .then(() => setSyncFailed(false))
+        .catch(() => {
+          setMarks((prev) => prev.filter((m) => !rows.some((row) => sameMark(row, m))))
+          setSyncFailed(true)
+        })
+    },
+    [liveShareOf, mutate, myId, setMarks]
+  )
+
+  /**
+   * Take a mark back. A shared mark is a row both of you can delete, so an
+   * undo reaches your friend the same way the mark did; anything that was
+   * only ever yours — progress from before you paired up — comes out of your
+   * own record and stays there.
+   */
+  const removeWatched = useCallback(
+    (id, entry, label) => {
+      const share = liveShareOf(id)
+      const shared = share
+        ? marksRef.current.find((m) => sameMark(m, { share_id: share.id, ...entry }))
+        : null
+
+      if (!shared) {
+        mutate((u) => {
+          unapplyMark(u, entry)
+          if (label) withdrawActivity(u, id, label)
+        })
+        return
+      }
+
+      setMarks((prev) => prev.filter((m) => !sameMark(m, shared)))
+      if (label) mutate((u) => withdrawActivity(u, id, label, markSig(shared)))
+      removeMark(share.id, entry.kind, entry.key)
+        .then(() => setSyncFailed(false))
+        .catch(() => {
+          setMarks((prev) => (prev.some((m) => sameMark(m, shared)) ? prev : [...prev, shared]))
+          setSyncFailed(true)
+        })
+    },
+    [liveShareOf, mutate, setMarks]
   )
 
   /** Fetch the full record when we only hold a search/trending summary. */
@@ -268,13 +595,11 @@ export default function App() {
   const toggleWatchlist = useCallback(
     (id) => {
       ensureFull(id)
-      mutate((u) => {
-        const i = u.watchlist.indexOf(id)
-        if (i >= 0) u.watchlist.splice(i, 1)
-        else u.watchlist.push(id)
-      })
+      const entry = { kind: 'watchlist', key: id }
+      if (effRef.current.watchlist.includes(id)) removeWatched(id, entry)
+      else addWatched(id, [entry])
     },
-    [mutate, ensureFull]
+    [ensureFull, addWatched, removeWatched]
   )
 
   /**
@@ -287,26 +612,25 @@ export default function App() {
     (id) => {
       if (anim[id]) return
       const title = titles[id]
-      const next = nextUnwatched(title, userRef.current.watchedEpisodes)
+      const next = nextUnwatched(title, effRef.current.watchedEpisodes)
       if (!next) return
 
       setAnim((a) => ({ ...a, [id]: 'out' }))
       later(() => {
-        mutate((u) => {
-          u.watchedEpisodes.add(episodeKey(id, next.season, next.episode))
-          recordActivity(u, id, episodeCode(next.season, next.episode))
-        })
+        const key = episodeKey(id, next.season, next.episode)
+        addWatched(id, [{ kind: 'episode', key }], episodeCode(next.season, next.episode))
         // A caught-up show leaves Up Next; it returns when a new episode airs
         // or the latest one is un-marked. Clear any pin from an earlier undo
         // so it can't hold the finished card on screen.
-        if (!nextUnwatched(title, userRef.current.watchedEpisodes)) {
+        const after = new Set(effRef.current.watchedEpisodes).add(key)
+        if (!nextUnwatched(title, after)) {
           setPinned((f) => (f[id] ? { ...f, [id]: false } : f))
         }
         setAnim((a) => ({ ...a, [id]: 'in' }))
         later(() => setAnim((a) => ({ ...a, [id]: null })), 40)
       }, 190)
     },
-    [anim, titles, mutate, later]
+    [anim, titles, addWatched, later]
   )
 
   /**
@@ -320,14 +644,10 @@ export default function App() {
       const title = titles[id]
 
       if (title.type === 'movie') {
-        if (!userRef.current.watchedMovies.has(id)) return
+        if (!effRef.current.watchedMovies.has(id)) return
         setAnim((a) => ({ ...a, [id]: 'undo-out' }))
         later(() => {
-          mutate((u) => {
-            u.watchedMovies.delete(id)
-            const i = u.lastActivity.findIndex((a) => a.titleId === id && a.label === 'Watched')
-            if (i >= 0) u.lastActivity.splice(i, 1)
-          })
+          removeWatched(id, { kind: 'movie', key: id }, 'Watched')
           setPinned((f) => ({ ...f, [id]: true }))
           setAnim((a) => ({ ...a, [id]: 'undo-in' }))
           later(() => setAnim((a) => ({ ...a, [id]: null })), 40)
@@ -335,100 +655,86 @@ export default function App() {
         return
       }
 
-      const target = lastWatched(title, userRef.current.watchedEpisodes)
+      const target = lastWatched(title, effRef.current.watchedEpisodes)
       if (!target) return
 
       setAnim((a) => ({ ...a, [id]: 'undo-out' }))
       later(() => {
-        const code = episodeCode(target.season, target.episode)
-        mutate((u) => {
-          u.watchedEpisodes.delete(episodeKey(id, target.season, target.episode))
-          const i = u.lastActivity.findIndex((a) => a.titleId === id && a.label === code)
-          if (i >= 0) u.lastActivity.splice(i, 1)
-        })
-        if (counts(title, userRef.current.watchedEpisodes).watched === 0) {
+        const key = episodeKey(id, target.season, target.episode)
+        removeWatched(id, { kind: 'episode', key }, episodeCode(target.season, target.episode))
+        const after = new Set(effRef.current.watchedEpisodes)
+        after.delete(key)
+        if (counts(title, after).watched === 0) {
           setPinned((f) => ({ ...f, [id]: true }))
         }
         setAnim((a) => ({ ...a, [id]: 'undo-in' }))
         later(() => setAnim((a) => ({ ...a, [id]: null })), 40)
       }, 190)
     },
-    [anim, titles, mutate, later]
+    [anim, titles, removeWatched, later]
   )
 
   /** Mark a queued film watched from Up Next; the card leaves the queue. */
   const markMovieNext = useCallback(
     (id) => {
       if (anim[id]) return
-      if (userRef.current.watchedMovies.has(id)) return
+      if (effRef.current.watchedMovies.has(id)) return
       setAnim((a) => ({ ...a, [id]: 'out' }))
       later(() => {
-        mutate((u) => {
-          u.watchedMovies.add(id)
-          recordActivity(u, id, 'Watched')
-        })
+        addWatched(id, [{ kind: 'movie', key: id }], 'Watched')
         setPinned((f) => (f[id] ? { ...f, [id]: false } : f))
         setAnim((a) => ({ ...a, [id]: 'in' }))
         later(() => setAnim((a) => ({ ...a, [id]: null })), 40)
       }, 190)
     },
-    [anim, mutate, later]
+    [anim, addWatched, later]
   )
 
   const toggleEpisode = useCallback(
     (id, season, episode) => {
       const key = episodeKey(id, season, episode)
-      mutate((u) => {
-        if (u.watchedEpisodes.has(key)) u.watchedEpisodes.delete(key)
-        else {
-          u.watchedEpisodes.add(key)
-          recordActivity(u, id, episodeCode(season, episode))
-        }
-      })
+      const code = episodeCode(season, episode)
+      if (effRef.current.watchedEpisodes.has(key)) removeWatched(id, { kind: 'episode', key }, code)
+      else addWatched(id, [{ kind: 'episode', key }], code)
     },
-    [mutate]
+    [addWatched, removeWatched]
   )
 
   const markSeason = useCallback(
     (id, seasonNumber) => {
       const season = titles[id].seasons.find((s) => s.number === seasonNumber)
-      mutate((u) => {
-        season.episodes.forEach((ep) => u.watchedEpisodes.add(episodeKey(id, seasonNumber, ep.number)))
-        recordActivity(u, id, `Season ${seasonNumber} watched`)
-      })
+      addWatched(
+        id,
+        season.episodes.map((ep) => ({ kind: 'episode', key: episodeKey(id, seasonNumber, ep.number) })),
+        `Season ${seasonNumber} watched`
+      )
     },
-    [titles, mutate]
+    [titles, addWatched]
   )
 
   /** Mark an episode and everything before it watched. */
   const catchUp = useCallback(
     (id, seasonNumber, episodeNumber) => {
       const title = titles[id]
-      mutate((u) => {
-        for (const s of title.seasons) {
-          if (s.number > seasonNumber) break
-          for (const ep of s.episodes) {
-            if (s.number === seasonNumber && ep.number > episodeNumber) break
-            u.watchedEpisodes.add(episodeKey(id, s.number, ep.number))
-          }
+      const entries = []
+      for (const s of title.seasons) {
+        if (s.number > seasonNumber) break
+        for (const ep of s.episodes) {
+          if (s.number === seasonNumber && ep.number > episodeNumber) break
+          entries.push({ kind: 'episode', key: episodeKey(id, s.number, ep.number) })
         }
-        recordActivity(u, id, `Caught up to ${episodeCode(seasonNumber, episodeNumber)}`)
-      })
+      }
+      addWatched(id, entries, `Caught up to ${episodeCode(seasonNumber, episodeNumber)}`)
     },
-    [titles, mutate]
+    [titles, addWatched]
   )
 
   const toggleMovie = useCallback(
     (id) => {
-      mutate((u) => {
-        if (u.watchedMovies.has(id)) u.watchedMovies.delete(id)
-        else {
-          u.watchedMovies.add(id)
-          recordActivity(u, id, 'Watched')
-        }
-      })
+      if (effRef.current.watchedMovies.has(id)) removeWatched(id, { kind: 'movie', key: id }, 'Watched')
+      else addWatched(id, [{ kind: 'movie', key: id }], 'Watched')
     },
-    [mutate]
+    [addWatched, removeWatched]
   )
 
   const rate = useCallback(
@@ -497,7 +803,7 @@ export default function App() {
     }
     Promise.all(seeds.map((id) => getRecommendations(id).catch(() => []))).then((lists) => {
       if (recSig.current !== sig) return
-      const tracked = new Set(trackedIds(userRef.current))
+      const tracked = new Set(trackedIds(effRef.current))
       const scored = new Map()
       lists.forEach((list) =>
         list.forEach((t, position) => {
@@ -523,26 +829,193 @@ export default function App() {
     })
   }, [loaded, user, titles])
 
+  // --- Friends -------------------------------------------------------------
+
+  const nameOf = useCallback((id) => social.names[id] || 'someone', [social.names])
+  const titleName = useCallback((id) => titles[id]?.name || 'a title', [titles])
+
+  const friends = useMemo(() => {
+    if (!myId) return []
+    return social.friendships
+      .filter((f) => f.status === 'accepted')
+      .map((f) => {
+        const other = f.requester === myId ? f.addressee : f.requester
+        return { id: f.id, userId: other, username: nameOf(other) }
+      })
+      .sort((a, b) => a.username.localeCompare(b.username))
+  }, [social.friendships, myId, nameOf])
+
+  const incomingRequests = useMemo(
+    () =>
+      social.friendships
+        .filter((f) => f.status === 'pending' && f.addressee === myId)
+        .map((f) => ({ id: f.id, username: nameOf(f.requester) })),
+    [social.friendships, myId, nameOf]
+  )
+
+  const outgoingRequests = useMemo(
+    () =>
+      social.friendships
+        .filter((f) => f.status === 'pending' && f.requester === myId)
+        .map((f) => ({ id: f.id, username: nameOf(f.addressee) })),
+    [social.friendships, myId, nameOf]
+  )
+
+  const shareRow = useCallback(
+    (sh) => ({
+      id: sh.id,
+      titleId: sh.title_id,
+      name: titleName(sh.title_id),
+      username: nameOf(sh.inviter === myId ? sh.invitee : sh.inviter),
+    }),
+    [titleName, nameOf, myId]
+  )
+
+  const sharing = useMemo(() => liveShares.map(shareRow), [liveShares, shareRow])
+  const shareInvites = useMemo(
+    () => social.shares.filter((sh) => sh.status === 'pending' && sh.invitee === myId).map(shareRow),
+    [social.shares, myId, shareRow]
+  )
+  const shareRequests = useMemo(
+    () => social.shares.filter((sh) => sh.status === 'pending' && sh.inviter === myId).map(shareRow),
+    [social.shares, myId, shareRow]
+  )
+
+  /** Run a social action, then re-read. Returns an error string, or null. */
+  const socialAction = useCallback(
+    async (fn) => {
+      try {
+        const result = await fn()
+        await refreshSocial()
+        return result || null
+      } catch (err) {
+        return err.message || 'That did not go through — try again.'
+      }
+    },
+    [refreshSocial]
+  )
+
   const account = useMemo(
     () => ({
       email: session?.user?.email ?? null,
+      username: profile?.username ?? null,
+      // A username is what a friend adds you by, so an account without one
+      // cannot take part until it picks one.
+      needsUsername: !!session && !profile,
       signIn: async (email, password) => {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         return error ? error.message : null
       },
-      signUp: async (email, password) => {
+      signUp: async (email, password, username) => {
+        const problem = usernameProblem(username)
+        if (problem) return problem
+        try {
+          if (!(await usernameAvailable(username))) return 'That username is taken.'
+        } catch {
+          return 'Could not check that username — try again.'
+        }
         const { data, error } = await supabase.auth.signUp({ email, password })
         if (error) return error.message
-        return data.session ? null : 'Check your email to confirm your account, then sign in.'
+        if (!data.session) {
+          // The account exists but there is no session to hang the username
+          // on yet; claim it when the confirmation link brings one back.
+          writePendingUsername(username.trim())
+          return 'Check your email to confirm your account, then sign in.'
+        }
+        try {
+          setProfile(await claimUsername(data.session.user.id, username))
+        } catch (err) {
+          return err.message
+        }
+        return null
       },
       signOut: async () => {
         syncedUserId.current = null
         await supabase.auth.signOut()
+        setProfile(null)
+        setSocial(EMPTY_SOCIAL)
         return null
       },
+      chooseUsername: async (username) => {
+        const problem = usernameProblem(username)
+        if (problem) return problem
+        if (!session) return 'Sign in first.'
+        try {
+          setProfile(await claimUsername(session.user.id, username))
+          writePendingUsername('')
+          return null
+        } catch (err) {
+          return err.message
+        }
+      },
+      friends,
+      incomingRequests,
+      outgoingRequests,
+      // Resolves to `{ ok }` or `{ error }` — the card shows either as it is.
+      addFriend: async (username) => {
+        if (!myId) return { error: 'Sign in first.' }
+        const result = await sendFriendRequest(myId, username).catch((err) => ({ error: err.message }))
+        await refreshSocial()
+        return result
+      },
+      acceptFriend: (id) => socialAction(() => acceptFriendRequest(id)),
+      removeFriend: (id) => socialAction(() => removeFriendship(id)),
+      sharing,
+      shareInvites,
+      shareRequests,
+      acceptInvite: (id) => socialAction(() => acceptShare(id)),
+      declineInvite: (id) => socialAction(() => dropShare(id)),
+      stopSharing: (id) => socialAction(() => endShare(id)),
+      openTitle,
     }),
-    [session]
+    [
+      session,
+      profile,
+      friends,
+      incomingRequests,
+      outgoingRequests,
+      sharing,
+      shareInvites,
+      shareRequests,
+      myId,
+      refreshSocial,
+      socialAction,
+      openTitle,
+    ]
   )
+
+  /*
+   * The watch-together controls on a title: one row per friend, carrying
+   * whichever of the four states you are in with them on this title.
+   */
+  const watchTogether = useMemo(() => {
+    if (!titleId) return null
+    const relevant = social.shares.filter((sh) => sh.title_id === titleId && sh.status !== 'ended')
+    const rows = friends.map((f) => {
+      const sh = relevant.find((x) => x.inviter === f.userId || x.invitee === f.userId)
+      const state = !sh
+        ? 'none'
+        : sh.status === 'accepted'
+          ? 'watching'
+          : sh.inviter === myId
+            ? 'invited'
+            : 'asked'
+      return { userId: f.userId, username: f.username, state, shareId: sh?.id || null }
+    })
+    return {
+      signedIn: !!myId,
+      hasUsername: !!profile,
+      rows,
+      onInvite: async (friendId) => {
+        const { error } = await inviteToWatch(myId, friendId, titleId)
+        await refreshSocial()
+        return error || null
+      },
+      onAccept: (id) => socialAction(() => acceptShare(id)),
+      onDecline: (id) => socialAction(() => dropShare(id)),
+      onStop: (id) => socialAction(() => endShare(id)),
+    }
+  }, [titleId, social.shares, friends, myId, profile, refreshSocial, socialAction])
 
   // --- Derived views -------------------------------------------------------
 
@@ -551,14 +1024,15 @@ export default function App() {
     return Object.values(titles).filter((t) => {
       if (t.partial) return false
       if (pinned[t.id]) return true
+      const queued = user.watchlist.includes(t.id) || sharedTitleIds.has(t.id)
       if (t.type === 'show') {
         const watched = counts(t, user.watchedEpisodes).watched
         if (watched > 0) return pctOf(t, user) < 100
-        return user.watchlist.includes(t.id) // queued but not started
+        return queued // queued but not started
       }
-      return user.watchlist.includes(t.id) && !user.watchedMovies.has(t.id)
+      return queued && !user.watchedMovies.has(t.id)
     })
-  }, [titles, user, pinned])
+  }, [titles, user, pinned, sharedTitleIds])
 
   // Up Next is ordered by recent activity when it is first built, then holds
   // that order so a card never jumps while you are working down the list.
@@ -650,10 +1124,12 @@ export default function App() {
       })
   }, [queue, titles, user, anim, markNext, markMovieNext, undoLast, openTitle])
 
-  const tracked = useMemo(
-    () => (user ? trackedIds(user).map((id) => titles[id]).filter(Boolean) : []),
-    [user, titles]
-  )
+  const tracked = useMemo(() => {
+    if (!user) return []
+    const ids = new Set(trackedIds(user))
+    sharedTitleIds.forEach((id) => ids.add(id))
+    return [...ids].map((id) => titles[id]).filter(Boolean)
+  }, [user, titles, sharedTitleIds])
 
   /*
    * "Because you like <genre>": one rail per top-two genre, tallied the same
@@ -736,6 +1212,9 @@ export default function App() {
 
     return {
       title: t,
+      sharedWith: liveShares
+        .filter((sh) => sh.title_id === t.id)
+        .map((sh) => nameOf(sh.inviter === myId ? sh.invitee : sh.inviter)),
       name: t.name,
       isShow,
       isMovie: !isShow,
@@ -787,7 +1266,21 @@ export default function App() {
           })
         : [],
     }
-  }, [user, titles, titleId, openSeasons, toggleWatchlist, toggleMovie, rate, markSeason, toggleEpisode, catchUp])
+  }, [
+    user,
+    titles,
+    titleId,
+    openSeasons,
+    liveShares,
+    nameOf,
+    myId,
+    toggleWatchlist,
+    toggleMovie,
+    rate,
+    markSeason,
+    toggleEpisode,
+    catchUp,
+  ])
 
   const discoverItem = useCallback(
     (t, withType) => ({
@@ -806,7 +1299,7 @@ export default function App() {
   const resultItems = useMemo(() => results.map((t) => discoverItem(t, true)), [results, discoverItem])
   const recItems = useMemo(() => recs.map((t) => discoverItem(t, false)), [recs, discoverItem])
 
-  const trackedSet = useMemo(() => new Set(user ? trackedIds(user) : []), [user])
+  const trackedSet = useMemo(() => new Set(tracked.map((t) => t.id)), [tracked])
 
   const discoverRows = useMemo(() => {
     const defs = [
@@ -958,6 +1451,7 @@ export default function App() {
         {loaded && screen === 'title' && (
           <TitleDetail
             detail={detail}
+            watchTogether={watchTogether}
             dark={dark}
             onBack={() => {
               setScreen(tab)
@@ -979,9 +1473,9 @@ export default function App() {
           />
         )}
 
-        {loaded && screen === 'stats' && (
-          <Stats tiles={statsView.tiles} topGenres={statsView.topGenres} account={account} />
-        )}
+        {loaded && screen === 'stats' && <Stats tiles={statsView.tiles} topGenres={statsView.topGenres} />}
+
+        {loaded && screen === 'account' && <Account account={account} />}
       </div>
 
       <TabBar tab={tab} onSelect={goTab} />

@@ -3,6 +3,7 @@ const TABS = [
   ['library', 'Library'],
   ['discover', 'Discover'],
   ['stats', 'Stats'],
+  ['account', 'Account'],
 ]
 
 export default function TabBar({ tab, onSelect }) {
@@ -33,13 +34,13 @@ export default function TabBar({ tab, onSelect }) {
             style={{
               flex: 1,
               minHeight: 60,
+              padding: '0 2px',
               background: 'none',
               border: 'none',
               borderTop: `2px solid ${active ? 'var(--seafoam)' : 'transparent'}`,
               color: active ? 'var(--aqua)' : 'var(--sub)',
               font: `${active ? 600 : 500} 12.5px 'Inter Tight', sans-serif`,
               cursor: 'pointer',
-              padding: 0,
             }}
           >
             {label}

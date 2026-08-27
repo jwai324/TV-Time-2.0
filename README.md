@@ -14,7 +14,7 @@ npm run build    # production bundle into dist/
 npm run preview  # serve the built bundle
 ```
 
-## The five screens
+## The six screens
 
 | Screen | What it does |
 | --- | --- |
@@ -23,6 +23,7 @@ npm run preview  # serve the built bundle
 | **Title detail** | Poster, synopsis and progress. Shows get season accordions with per-episode checkboxes, **Catch up**, and **Mark season watched**; films get a watched toggle and a five-star rating. |
 | **Discover** | TMDB search plus this week's trending row. Watchlist pills throughout. |
 | **Stats** | Hours watched, episodes this month, current streak, titles tracked, and a top-genres chart. |
+| **Account** | Your username, your friends and the requests waiting on them, and every show you are watching with someone. |
 
 ## How the code maps to the design
 
@@ -37,8 +38,9 @@ src/
   data/catalog.js      getTitle / getTrending / searchTitles — the title source
   lib/user.js          the user record, seeding, and its localStorage round-trip
   lib/progress.js      progress maths, next-episode lookup, poster colour
+  lib/social.js        usernames, friends, shares, and the marks they carry
   components/          TideBar, Poster, TabBar
-  screens/             UpNext, Library, TitleDetail, Discover, Stats
+  screens/             UpNext, Library, TitleDetail, Discover, Stats, Account
 ```
 
 Every colour, type ramp, radius and spacing value is carried over unchanged, so
@@ -92,12 +94,12 @@ integration.
 ## State, storage and sync
 
 Your record — watched episodes, watched films, watchlist, ratings, activity —
-persists to `localStorage` under `tideline.user.v1`. Sets do not survive JSON,
+persists to `localStorage` under `tideline.user.v2`. Sets do not survive JSON,
 so they are stored as arrays and rehydrated on read. When storage is
 unavailable (private browsing, a blocked origin), the app says so in a banner
 and runs from memory for the session.
 
-Signing in (the Account card on Stats) syncs that same record to a Supabase
+Signing in (the Account tab) syncs that same record to a Supabase
 project — one `user_state` row per user holding the record as jsonb, guarded
 by row-level security so each user can only ever touch their own row. The app
 stays a static bundle: `supabase-js` talks to the project straight from the
@@ -119,7 +121,67 @@ How the sync behaves:
 - Account creation may ask you to confirm your email; the confirmation link's
   landing page is configured in the Supabase dashboard (Auth → URL
   Configuration), so set the Site URL there to the deployed URL if you want
-  that link to land somewhere sensible.
+  that link to land somewhere sensible. The username you picked at sign-up is
+  held until that round-trip brings a session back, then claimed.
+
+## Friends, and watching a show together
+
+Two people who follow the same show should not have to mark every episode
+twice. Pair up on a title and one **Mark watched** counts for both of you.
+
+- **Usernames.** Every account has one — 3–20 characters, letters, numbers and
+  underscores, unique without regard to case. It is chosen at sign-up, and an
+  account made before usernames existed is asked for one the next time it signs
+  in. A username is the only thing a friend can see about your account, and it
+  is what they add you by.
+- **Friends are mutual.** You send a request to a username; nothing is shared
+  until they accept. Declining, withdrawing and unfriending are all the same
+  thing — the connection goes away.
+- **Sharing is per title.** Being friends shares nothing by itself. On a
+  show's screen, **Watch together** lists your friends; invite one and, once
+  they accept, that show — and only that show — is shared. So you can work
+  through one series with your partner and another with a sibling, and
+  everything else stays yours.
+- **What carries across.** Watched episodes, watched films, and watchlist
+  entries on a shared title. **Catch up** and **Mark season watched** carry
+  across the same way. Star ratings stay personal — the whole point of a
+  rating is that it is yours.
+- **Undo is symmetric.** Un-marking an episode of a shared show takes it back
+  for both of you, whoever marked it. The two records say the same thing at
+  all times, which is the only version of this that stays easy to reason
+  about.
+- **You start from where you are.** Pairing up copies no history in either
+  direction: only marks made after the invitation is accepted are shared. This
+  does mean two people who share a show mid-run can show different progress on
+  it, which is the honest reading of "we started watching this together now".
+- **It lands live.** A friend's mark appears within a second, over Supabase
+  Realtime — no reload, no refresh. Coming back to the app re-reads the shared
+  marks as well, so a socket that was asleep or blocked cannot leave you
+  behind.
+- **Stopping is not losing.** Stop watching something together and the
+  episodes you marked while sharing become yours to keep — each side folds
+  its own copy in. Nothing is deleted from under anybody. You can start the
+  same show over together later; that is a new share, and the old one is left
+  as it was.
+
+### How it is put together
+
+Your own record still lives in `user_state` as one jsonb blob. Shared marks do
+not go there — they live in their own rows, in `shared_marks`, which both
+members of a share can read and write. The screens read the union of the two
+(`withSharedMarks` in `src/lib/user.js`).
+
+That union is the whole design, and it buys three things at once. Marking an
+episode reaches your friend without anyone writing to anyone else's account,
+so row-level security stays simple and each policy scopes writes to the
+writer's own rows. Un-marking is the deletion of a single row, which is what
+makes undo symmetric for free. And pairing up copies nothing, so "start fresh
+from now" is not a rule the client has to enforce — it is just what the data
+already says.
+
+The four tables (`profiles`, `friendships`, `watch_shares`, `shared_marks`),
+their policies and the realtime publication are in
+[`supabase/migrations`](./supabase/migrations/), applied to the project.
 
 ## Theme
 
@@ -143,7 +205,20 @@ star rating declares `role="radiogroup"` as the design does, with each star a
 
 ## Verification
 
-Driven end to end in Chromium: 57 checks across all five screens covering
+Driven end to end in Chromium: 57 checks across the first five screens covering
 marking, catch-up, season completion, filters, all three sort orders, search by
 title and by genre, watchlist toggles, rating (including clearing it),
 persistence across a reload, empty states, and the dark theme.
+
+Shared watching was verified in three passes. The policies were walked through
+as three signed-in users against the live project — 26 checks covering username
+uniqueness and format, forged and crossing friend requests, inviting someone
+who is not a friend, marking before an invitation is accepted, signing a mark
+as somebody else, a stranger reading or deleting a share's marks, deleting an
+accepted share outright, and re-sharing a title after ending it. The record
+maths — the union, the round trip, activity ordering and withdrawal — was
+checked directly, 11 cases. The screens were then driven in Chromium against a
+stubbed project: marking a shared episode writes a shared mark rather than a
+private one, undo deletes that row, a friend's mark counts as your own, an
+ended share folds into your record exactly once, and a title you do not share
+never touches the shared table.
