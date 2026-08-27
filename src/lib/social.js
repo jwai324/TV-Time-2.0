@@ -1,6 +1,6 @@
 /**
- * Usernames, friends, and the shares that make two people's "watched" one
- * thing.
+ * Usernames, friends, the shares that make two people's "watched" one thing,
+ * and the recommendations they pass each other.
  *
  * Everything here is a round-trip against Supabase. The rule the whole
  * feature rests on: nobody ever writes to anybody else's record. A shared
@@ -8,7 +8,8 @@
  * share, and the client reads the union of your own record and the marks of
  * your live shares. So marking an episode marks it for both of you without a
  * single cross-user write, and un-marking it — a delete of that one row —
- * takes it back for both of you just as symmetrically.
+ * takes it back for both of you just as symmetrically. A recommendation is
+ * the same idea in one direction: a row only its recipient can answer.
  */
 
 import { supabase } from './supabase.js'
@@ -193,11 +194,77 @@ export async function removeMark(shareId, kind, key) {
   if (error) throw error
 }
 
+// --- recommendations -------------------------------------------------------
+
+/** A note is optional; this is as long as one may be. */
+export const RECOMMENDATION_NOTE_MAX = 280
+
+/** "Ask me later" is this long — long enough to forget, short enough to matter. */
+export const DEFER_DAYS = 3
+
+export async function fetchRecommendations() {
+  const { data, error } = await supabase
+    .from('recommendations')
+    .select('id, title_id, sender, recipient, note, status, remind_at, created_at')
+  if (error) throw error
+  return data || []
+}
+
+/**
+ * Put a title in front of a friend.
+ *
+ * The unique index covers one open recommendation per title per direction, so
+ * sending the same one twice is reported rather than duplicated.
+ */
+export async function sendRecommendation(myId, friendId, titleId, note) {
+  const trimmed = (note || '').trim()
+  const { error } = await supabase.from('recommendations').insert({
+    title_id: titleId,
+    sender: myId,
+    recipient: friendId,
+    note: trimmed ? trimmed.slice(0, RECOMMENDATION_NOTE_MAX) : null,
+    status: 'pending',
+  })
+  if (error) {
+    if (error.code === '23505') return { error: 'You have already recommended this to them.' }
+    return { error: error.message }
+  }
+  return {}
+}
+
+/** Watchlist it, or pass on it. Either way the question is settled. */
+export async function answerRecommendation(id, status) {
+  const { error } = await supabase
+    .from('recommendations')
+    .update({ status, remind_at: null, responded_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw error
+}
+
+/**
+ * Push the decision out.
+ *
+ * The row stays pending — a deferred recommendation is an open question, not
+ * an answer — and `remind_at` says when the client should ask again.
+ */
+export async function deferRecommendation(id, days = DEFER_DAYS) {
+  const when = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
+  const { error } = await supabase.from('recommendations').update({ remind_at: when }).eq('id', id)
+  if (error) throw error
+}
+
+/** Take back one you sent, or clear one you have already answered. */
+export async function dropRecommendation(id) {
+  const { error } = await supabase.from('recommendations').delete().eq('id', id)
+  if (error) throw error
+}
+
 // --- realtime --------------------------------------------------------------
 
 /**
  * Watch everything that can change under you: a friend's mark on a show you
- * share, a request, an invitation, a share ending.
+ * share, a request, an invitation, a share ending, a title a friend has just
+ * recommended.
  *
  * Marks are subscribed per share rather than table-wide. Realtime cannot
  * apply row-level security to a delete — the old row it sends carries no more
@@ -220,6 +287,8 @@ export function subscribeSocial({ userId, shareIds, onMarks, onSocial }) {
     ['friendships', 'addressee'],
     ['watch_shares', 'inviter'],
     ['watch_shares', 'invitee'],
+    ['recommendations', 'sender'],
+    ['recommendations', 'recipient'],
   ].forEach(([table, column]) => {
     channel.on(
       'postgres_changes',

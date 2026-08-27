@@ -423,6 +423,75 @@ function Together({ account, say }) {
   )
 }
 
+/**
+ * Recommendations that are still open: the ones you put off or looked away
+ * from, and the ones you sent that nobody has answered.
+ *
+ * A deferred recommendation is otherwise invisible until its three days are
+ * up, and "I will decide later" should not mean "I cannot decide sooner" —
+ * so *Decide now* brings the prompt straight back.
+ */
+function Recommendations({ account, say }) {
+  const [busy, setBusy] = useState(false)
+  const { recommendationsWaiting: waiting, recommendationsSent: sent } = account
+
+  if (!waiting.length && !sent.length) {
+    return (
+      <div style={mutedStyle}>
+        Nothing waiting. Open a title and hit <strong style={{ fontWeight: 500 }}>Recommend</strong> to put it in
+        front of a friend — they choose whether it lands on their watchlist.
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {waiting.map((r) => (
+        <Row
+          key={r.id}
+          primary={r.name}
+          secondary={`${r.username} recommended this${r.deferred ? ' — you put it off' : ''}`}
+          onOpen={() => account.openTitle(r.titleId)}
+          actions={
+            <button
+              className="tl-focus tl-hover-pill"
+              disabled={busy}
+              onClick={() => account.decideRecommendation(r.id)}
+              style={{ ...quietButton, color: 'var(--aqua)', borderColor: 'var(--aqua)' }}
+            >
+              Decide now
+            </button>
+          }
+        />
+      ))}
+      {sent.map((r) => (
+        <Row
+          key={r.id}
+          primary={r.name}
+          secondary={`recommended to ${r.username} — not answered yet`}
+          onOpen={() => account.openTitle(r.titleId)}
+          actions={
+            <button
+              className="tl-focus tl-hover-pill"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                say('')
+                const err = await account.withdrawRecommendation(r.id)
+                setBusy(false)
+                say(err || '')
+              }}
+              style={quietButton}
+            >
+              Withdraw
+            </button>
+          }
+        />
+      ))}
+    </>
+  )
+}
+
 export default function Account({ account }) {
   const [message, setMessage] = useState('')
   const signedIn = !!account.email
@@ -474,6 +543,9 @@ export default function Account({ account }) {
           </Section>
           <Section label="Watching together">
             <Together account={account} say={setMessage} />
+          </Section>
+          <Section label="Recommendations">
+            <Recommendations account={account} say={setMessage} />
           </Section>
         </>
       )}
