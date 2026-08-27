@@ -39,7 +39,7 @@ src/
   lib/user.js          the user record, seeding, and its localStorage round-trip
   lib/progress.js      progress maths, next-episode lookup, poster colour
   lib/social.js        usernames, friends, shares, and the marks they carry
-  components/          TideBar, Poster, TabBar
+  components/          TideBar, Poster, TabBar, DonationBanner, the recommend popups
   screens/             UpNext, Library, TitleDetail, Discover, Stats, Account
 ```
 
@@ -266,6 +266,20 @@ The five tables (`profiles`, `friendships`, `watch_shares`, `shared_marks`,
 `recommendations`), their policies and the realtime publication are in
 [`supabase/migrations`](./supabase/migrations/), applied to the project.
 
+## The donation banner
+
+Every screen carries the same line above it — *Donations appreciated via Venmo
+@Justin-Wai-324*. It is rendered once, in `App`, above the screen rather than
+inside any of them, so it says the same thing in the same place on every tab
+and on the title screen, and appears while the app is still loading.
+
+The handle links to [venmo.com/u/Justin-Wai-324](https://venmo.com/u/Justin-Wai-324),
+and only the handle does. A strip that is one big target is a strip you leave
+the app by catching on the way to a tab, and the underlined handle is the part
+that looks like it goes somewhere. It opens in a new tab, the same as the
+trailer link — nothing about paying someone should cost you your place in the
+app.
+
 ## Theme
 
 The design carries `darkMode` and `freshStart` as editor props with no UI behind
@@ -300,6 +314,16 @@ Driven end to end in Chromium: 57 checks across the first five screens covering
 marking, catch-up, season completion, filters, all three sort orders, search by
 title and by genre, watchlist toggles, rating (including clearing it),
 persistence across a reload, empty states, and the dark theme.
+
+The donation banner was checked in Chromium — 13 checks: the exact copy, that
+it is present before the app has loaded, that it sits at the top of all five
+tabs and above the **← Back** link on the title screen, that there is exactly
+one of it in the document rather than one per screen, the dark theme, and that
+it wraps onto two lines at 320px without the page scrolling sideways. The link
+was checked too: the handle alone carries it and is underlined, the browser
+requests `https://venmo.com/u/Justin-Wai-324`, it opens in a new tab under
+`noreferrer noopener` with the app still on the screen behind it, and it is
+the first tab stop on the page, drawing the design's own aqua focus ring.
 
 `nextUnwatched` and `lastWatched` are covered by 23 assertions over a
 three-season show: a viewer who starts at season three is taken through that
