@@ -10,6 +10,8 @@ import {
   remainingMinutes,
   pctOf,
   trackedIds,
+  unwatchedBeforeEpisode,
+  unwatchedBeforeSeason,
   wash,
 } from './lib/progress.js'
 import {
@@ -53,7 +55,9 @@ import {
   usernameAvailable,
   usernameProblem,
 } from './lib/social.js'
+import { loadPrefs, persistPrefs } from './lib/prefs.js'
 import { supabase } from './lib/supabase.js'
+import CatchUpPrompt from './components/CatchUpPrompt.jsx'
 import DonationBanner from './components/DonationBanner.jsx'
 import RecommendationPrompt from './components/RecommendationPrompt.jsx'
 import RecommendDialog from './components/RecommendDialog.jsx'
@@ -221,6 +225,18 @@ export default function App() {
   // Which Up Next sections are folded away. Kept across reloads, because a
   // section you closed is a decision, not a scroll position.
   const [collapsed, setCollapsed] = useState(readCollapsed)
+
+  // How this device wants to be asked things. Saved on every change, so a
+  // "don't ask this again" survives the reload it was pressed before.
+  const [prefs, setPrefs] = useState(loadPrefs)
+  const setPref = useCallback((key, value) => {
+    setPrefs((prev) => {
+      const next = { ...prev, [key]: value }
+      persistPrefs(next)
+      return next
+    })
+  }, [])
+
   const [anim, setAnim] = useState({})
   // Cards pinned on screen mid-interaction: a show marked to completion, or
   // undone back to zero watched, stays put instead of vanishing under the tap.
@@ -789,26 +805,91 @@ export default function App() {
     [anim, addWatched, settleMovie, later]
   )
 
+  /*
+   * Marking part-way into a show raises a question the app cannot answer for
+   * you: the episodes behind the one you ticked are either watched-and-never-
+   * marked or genuinely skipped, and the two lead to different records.
+   *
+   * `askCatchUp` is that question, held open over whatever screen you were on
+   * until you answer it. It carries only the mark it is about — the gap behind
+   * that mark is recomposed from the live record each render, so a friend's
+   * mark landing mid-question cannot leave the dialog describing a gap that
+   * has already closed.
+   */
+  const [askCatchUp, setAskCatchUp] = useState(null)
+
+  /** Leaving the title the question was raised on drops the question with it. */
+  useEffect(() => setAskCatchUp(null), [titleId])
+
+  /** Write an episode mark, optionally sweeping up the gap behind it. */
+  const markEpisode = useCallback(
+    (id, season, episode, withEarlier) => {
+      const key = episodeKey(id, season, episode)
+      const code = episodeCode(season, episode)
+      if (!withEarlier) {
+        addWatched(id, [{ kind: 'episode', key }], code)
+        return
+      }
+      const behind = unwatchedBeforeEpisode(titles[id], season, episode, effRef.current.watchedEpisodes)
+      addWatched(
+        id,
+        [...behind.map((e) => ({ kind: 'episode', key: e.key })), { kind: 'episode', key }],
+        `Caught up to ${code}`
+      )
+    },
+    [titles, addWatched]
+  )
+
   const toggleEpisode = useCallback(
     (id, season, episode) => {
       const key = episodeKey(id, season, episode)
-      const code = episodeCode(season, episode)
-      if (effRef.current.watchedEpisodes.has(key)) removeWatched(id, { kind: 'episode', key }, code)
-      else addWatched(id, [{ kind: 'episode', key }], code)
+      if (effRef.current.watchedEpisodes.has(key)) {
+        removeWatched(id, { kind: 'episode', key }, episodeCode(season, episode))
+        return
+      }
+      const behind = unwatchedBeforeEpisode(titles[id], season, episode, effRef.current.watchedEpisodes)
+      if (behind.length && prefs.askPreviousEpisodes) {
+        setAskCatchUp({ scope: 'episode', id, season, episode })
+        return
+      }
+      markEpisode(id, season, episode, false)
     },
-    [addWatched, removeWatched]
+    [titles, prefs, markEpisode, removeWatched]
+  )
+
+  /** Write a season mark, optionally sweeping up the seasons behind it. */
+  const markSeasonMarks = useCallback(
+    (id, seasonNumber, withEarlier) => {
+      const title = titles[id]
+      const season = title.seasons.find((s) => s.number === seasonNumber)
+      const mine = season.episodes.map((ep) => ({
+        kind: 'episode',
+        key: episodeKey(id, seasonNumber, ep.number),
+      }))
+      if (!withEarlier) {
+        addWatched(id, mine, `Season ${seasonNumber} watched`)
+        return
+      }
+      const behind = unwatchedBeforeSeason(title, seasonNumber, effRef.current.watchedEpisodes)
+      addWatched(
+        id,
+        [...behind.map((e) => ({ kind: 'episode', key: e.key })), ...mine],
+        `Caught up through season ${seasonNumber}`
+      )
+    },
+    [titles, addWatched]
   )
 
   const markSeason = useCallback(
     (id, seasonNumber) => {
-      const season = titles[id].seasons.find((s) => s.number === seasonNumber)
-      addWatched(
-        id,
-        season.episodes.map((ep) => ({ kind: 'episode', key: episodeKey(id, seasonNumber, ep.number) })),
-        `Season ${seasonNumber} watched`
-      )
+      const behind = unwatchedBeforeSeason(titles[id], seasonNumber, effRef.current.watchedEpisodes)
+      if (behind.length && prefs.askPreviousSeasons) {
+        setAskCatchUp({ scope: 'season', id, season: seasonNumber })
+        return
+      }
+      markSeasonMarks(id, seasonNumber, false)
     },
-    [titles, addWatched]
+    [titles, prefs, markSeasonMarks]
   )
 
   /** Mark an episode and everything before it watched. */
@@ -1178,6 +1259,89 @@ export default function App() {
     }
   }, [titleId, sentRecs, friends, titleName, myId, refreshSocial, dropRec])
 
+  /*
+   * The open catch-up question, written out: what is behind the mark, what
+   * each answer will do, and where the switch that silences it stands.
+   *
+   * It is derived rather than stored, so the counts it quotes are the counts
+   * as of this render, and a gap that closes underneath the dialog — a shared
+   * mark, a sync landing — simply retires the question.
+   */
+  const catchUpPrompt = useMemo(() => {
+    if (!askCatchUp || !user) return null
+    const { scope, id, season, episode } = askCatchUp
+    const title = titles[id]
+    if (!title || title.type !== 'show') return null
+
+    const behind =
+      scope === 'season'
+        ? unwatchedBeforeSeason(title, season, user.watchedEpisodes)
+        : unwatchedBeforeEpisode(title, season, episode, user.watchedEpisodes)
+    if (!behind.length) return null
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+    const seasonsBehind = new Set(behind.map((e) => e.season))
+    const done = () => setAskCatchUp(null)
+
+    const common = {
+      name: title.name,
+      ask: scope === 'season' ? prefs.askPreviousSeasons : prefs.askPreviousEpisodes,
+      onToggleAsk: () =>
+        scope === 'season'
+          ? setPref('askPreviousSeasons', !prefs.askPreviousSeasons)
+          : setPref('askPreviousEpisodes', !prefs.askPreviousEpisodes),
+      onCancel: done,
+    }
+
+    if (scope === 'season') {
+      return {
+        ...common,
+        heading: 'Have you watched all the previous seasons?',
+        detail: `You're marking season ${season} watched, but ${plural(
+          behind.length,
+          'episode'
+        )} across ${plural(seasonsBehind.size, 'earlier season')} ${
+          behind.length === 1 ? 'is' : 'are'
+        } still unmarked.`,
+        yesLabel: 'Yes — mark those too',
+        noLabel: 'No — just this season',
+        onYes: () => {
+          markSeasonMarks(id, season, true)
+          done()
+        },
+        onNo: () => {
+          markSeasonMarks(id, season, false)
+          done()
+        },
+      }
+    }
+
+    return {
+      ...common,
+      heading: 'Have you watched all the previous episodes?',
+      detail: `You're marking ${episodeCode(season, episode)} watched, but ${plural(
+        behind.length,
+        'earlier episode'
+      )} in season ${season} ${behind.length === 1 ? 'is' : 'are'} still unmarked.`,
+      yesLabel: 'Yes — mark those too',
+      noLabel: 'No — just this episode',
+      onYes: () => {
+        markEpisode(id, season, episode, true)
+        done()
+      },
+      onNo: () => {
+        markEpisode(id, season, episode, false)
+        done()
+      },
+    }
+  }, [askCatchUp, user, titles, prefs, setPref, markSeasonMarks, markEpisode])
+
+  // A question that answered itself — the gap behind the mark closed while it
+  // was open — is put down rather than left half-held.
+  useEffect(() => {
+    if (askCatchUp && !catchUpPrompt) setAskCatchUp(null)
+  }, [askCatchUp, catchUpPrompt])
+
   const account = useMemo(
     () => ({
       email: session?.user?.email ?? null,
@@ -1253,6 +1417,10 @@ export default function App() {
       recommendationsSent: recommendRows.sent,
       decideRecommendation: decideRec,
       withdrawRecommendation: dropRec,
+      // The prompts are settings of this device, not of the account, so they
+      // are here for everyone — signed in or not.
+      prefs,
+      setPref,
       openTitle,
     }),
     [
@@ -1270,6 +1438,8 @@ export default function App() {
       recommendRows,
       decideRec,
       dropRec,
+      prefs,
+      setPref,
       openTitle,
     ]
   )
@@ -1438,7 +1608,7 @@ export default function App() {
     const pick = (group, kind) => cards.filter((c) => c.group === group && c.kind === kind)
     return [
       { key: 'watching', label: 'Currently watching' },
-      { key: 'new', label: 'Start new' },
+      { key: 'new', label: "Haven't started yet" },
     ]
       .map(({ key, label }) => {
         const groups = [
@@ -1845,12 +2015,18 @@ export default function App() {
       )}
 
       {/*
+        A catch-up question is about the tap that just happened, so it comes
+        first and holds everything else back until it is answered.
+      */}
+      {loaded && catchUpPrompt && <CatchUpPrompt prompt={catchUpPrompt} />}
+
+      {/*
         An incoming recommendation is a question, so it is asked rather than
         filed: it comes up over whatever screen you are on, and the next one
         takes its place once this one is answered. The send dialog holds it
         back for a moment — two popups at once is neither question answered.
       */}
-      {loaded && prompt && !recommending && <RecommendationPrompt prompt={prompt} dark={dark} />}
+      {loaded && prompt && !recommending && !catchUpPrompt && <RecommendationPrompt prompt={prompt} dark={dark} />}
 
       <TabBar tab={tab} onSelect={goTab} />
     </div>

@@ -131,3 +131,30 @@ export function trackedIds(user) {
   Object.keys(user.ratings).forEach((id) => ids.add(id))
   return [...ids]
 }
+
+/**
+ * The unwatched episodes that sit behind a point in a show.
+ *
+ * Both catch-up prompts turn on this: they are worth asking only when there is
+ * a gap to offer to fill, and the same list is what filling it marks. Each
+ * entry carries its `key`, so the caller can hand them straight to a mark.
+ */
+const unwatchedWhere = (title, watchedEpisodes, keep) => {
+  const gaps = []
+  for (const s of title.seasons) {
+    for (const ep of s.episodes) {
+      if (!keep(s.number, ep.number)) continue
+      const key = episodeKey(title.id, s.number, ep.number)
+      if (!watchedEpisodes.has(key)) gaps.push({ season: s.number, episode: ep.number, key })
+    }
+  }
+  return gaps
+}
+
+/** Everything still unwatched in the seasons before this one. */
+export const unwatchedBeforeSeason = (title, seasonNumber, watchedEpisodes) =>
+  unwatchedWhere(title, watchedEpisodes, (s) => s < seasonNumber)
+
+/** Everything still unwatched earlier in this episode's own season. */
+export const unwatchedBeforeEpisode = (title, seasonNumber, episodeNumber, watchedEpisodes) =>
+  unwatchedWhere(title, watchedEpisodes, (s, e) => s === seasonNumber && e < episodeNumber)

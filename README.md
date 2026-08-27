@@ -18,12 +18,12 @@ npm run preview  # serve the built bundle
 
 | Screen | What it does |
 | --- | --- |
-| **Up Next** | Your queue in two collapsible sections — **Currently watching** over **Start new**, each split into Shows and Movies — with a one-tap **Mark watched** and an **Undo** that steps back. |
+| **Up Next** | Your queue in two collapsible sections — **Currently watching** over **Haven't started yet**, each split into Shows and Movies — with a one-tap **Mark watched** and an **Undo** that steps back. |
 | **Library** | Everything you track, filtered by All / Shows / Movies / Watchlist / Finished and sorted by recent activity (ties broken by the most hours left to watch), title, or progress. |
-| **Title detail** | Poster, synopsis and progress. Shows get season accordions with per-episode checkboxes, **Catch up**, and **Mark season watched**; films get a watched toggle, **Start watching**, and a five-star rating. |
+| **Title detail** | Poster, synopsis and progress. Shows get season accordions with per-episode checkboxes, **Catch up**, and **Mark season watched** — the last two ask about the gap behind them; films get a watched toggle, **Start watching**, and a five-star rating. |
 | **Discover** | TMDB search plus this week's trending row. Watchlist pills throughout. |
 | **Stats** | Hours watched, episodes this month, current streak, titles tracked, and a top-genres chart. |
-| **Account** | Your username, your friends and the requests waiting on them, and every show you are watching with someone. |
+| **Account** | Your username, your friends and the requests waiting on them, every show you are watching with someone, and the **Prompts** switches for the catch-up questions. |
 
 ## How the code maps to the design
 
@@ -38,8 +38,9 @@ src/
   data/catalog.js      getTitle / getTrending / searchTitles — the title source
   lib/user.js          the user record, seeding, and its localStorage round-trip
   lib/progress.js      progress maths, next-episode lookup, poster colour
+  lib/prefs.js         device preferences — whether the catch-up prompts ask
   lib/social.js        usernames, friends, shares, and the marks they carry
-  components/          TideBar, Poster, TabBar, DonationBanner, the recommend popups
+  components/          TideBar, Poster, TabBar, DonationBanner, the recommend and catch-up popups
   screens/             UpNext, Library, TitleDetail, Discover, Stats, Account
 ```
 
@@ -60,8 +61,8 @@ The queue is two sections, each split into shows and films:
 
 - **Currently watching** — shows with at least one episode marked, and films
   you have said you have started.
-- **Start new** — everything else waiting: watchlisted shows you have not
-  begun, and watchlisted films you have not started.
+- **Haven't started yet** — everything else waiting: watchlisted shows you
+  have not begun, and watchlisted films you have not started.
 
 A section folds away by its header and stays folded across reloads, because a
 section you closed is a decision rather than a scroll position. Only the two
@@ -80,7 +81,7 @@ than to the bottom of the page.
 
 A show tells you where you are by its episodes; a film has no such thing, so
 being part-way through one is something you have to say. **Start watching** on
-a film's screen moves it from Start new to Currently watching, and marking it
+a film's screen moves it from Haven't started yet to Currently watching, and marking it
 watched settles the question and takes the flag off. No percentage is invented
 for a film in progress — nothing here knows how far into it you are — so its
 card says `Watching` where an unstarted film says `Film`, and its tide bar
@@ -89,6 +90,47 @@ stays where it was.
 Started films are a private note to yourself: unlike watched films, they are
 not shared with anyone you are watching the film with, because where you got
 to in it is yours.
+
+## Catching up on what you skipped past
+
+Marking something in the middle of a show leaves a question behind. Ticking
+S03E07 could mean you have watched the six episodes before it and never got
+round to marking them, or it could mean you deliberately started there. Only
+the person tapping knows which, and the two answers produce very different
+records — so the app asks rather than guesses.
+
+Two questions, each raised only when there is a real gap behind the mark:
+
+- **Marking a season watched** with unwatched episodes in earlier seasons asks
+  whether you have watched all the previous seasons. *Yes* sweeps up every
+  unmarked episode before it as well; *No* marks that season alone.
+- **Ticking an episode** with earlier episodes of *that same season* still
+  unmarked asks whether you have watched the previous episodes. *Yes* fills in
+  the rest of the season up to it; *No* marks the one episode.
+
+The episode question stays inside its own season on purpose. A viewer who
+joined a show at its current season has not left a gap behind them — that is
+the same reading `nextUnwatched` takes — so seasons they never started are not
+something to ask about one episode at a time. The whole-show version of the
+sweep already has a button: **Catch up**, which marks an episode and
+everything before it across every season, and does not ask, because asking for
+it is what pressing it means.
+
+Each dialog carries a **Don't ask this again** switch. It takes effect the
+moment it is pressed and applies to that question only, so silencing the
+episode prompt leaves the season prompt asking. Both switches live under
+**Account · Prompts** and can be turned back on there at any time — which is
+the deal that makes a "don't ask this again" safe to press. They are settings
+of the device rather than of the account (nothing about them is watch history,
+so nothing about them needs to sync), stored in `localStorage` under
+`tideline.prefs.v1` alongside the folded Up Next sections.
+
+Dismissing a catch-up dialog — Escape, or a tap outside it — cancels the mark
+outright rather than picking an answer for you. Nothing has been written at
+that point, so the mark not happening is the one reading that cannot be wrong.
+And because the counts the dialog quotes are recomposed from the live record
+each render rather than frozen when it opened, a friend's mark landing on a
+shared show mid-question closes the gap and retires the question with it.
 
 ## Behaviour carried over verbatim
 
@@ -112,7 +154,8 @@ reproduced as-is:
   means a season you fully complete closes itself, and a show you joined
   mid-run opens on the season you are actually watching.
 - `episodes this month` counts single-episode activity only; *Catch up* and
-  *Mark season watched* log their own labels and are excluded.
+  *Mark season watched* log their own labels and are excluded. A prompt
+  answered *Yes* logs as a catch-up for the same reason.
 
 ## Data
 
@@ -139,7 +182,9 @@ integration.
 
 Your record — watched episodes, watched films, films you have started,
 watchlist, ratings, activity — persists to `localStorage` under
-`tideline.user.v2`. Sets do not survive JSON,
+`tideline.user.v2`. Device preferences (whether each catch-up prompt still
+asks) sit apart from it under `tideline.prefs.v1`, because they describe this
+browser rather than your viewing. Sets do not survive JSON,
 so they are stored as arrays and rehydrated on read. When storage is
 unavailable (private browsing, a blocked origin), the app says so in a banner
 and runs from memory for the session.
@@ -302,12 +347,22 @@ star rating declares `role="radiogroup"` as the design does, with each star a
 
 ## Verification
 
+The catch-up prompts were driven in Chromium against a stubbed three-season
+show: **Mark season watched** on season 3 raises the season question naming
+the right gap (6 episodes across 2 earlier seasons), *No* marks that season
+alone (3 of 9), ticking S01E03 raises the episode question scoped to its own
+season (2 earlier episodes in season 1), *Yes* fills the season in (6 of 9),
+**Don't ask this again** persists the moment it is pressed and the next
+episode tick marks straight through without asking (7 of 9), and the switch
+under **Account · Prompts** turns it back on. Up Next reads *Haven't started
+yet* and no longer says *Start new*.
+
 The sectioned Up Next was driven in Chromium against a stubbed project, with
 one title seeded for each of the four sub-sections: the two sections appear in
 order with the right titles under the right headings, folding one hides its
 cards and leaves the other alone, the fold survives a reload, marking still
-works from inside a section, **Start watching** moves a film from Start new to
-Currently watching, and marking that film watched takes the started flag back
+works from inside a section, **Start watching** moves a film from Haven't started yet
+to Currently watching, and marking that film watched takes the started flag back
 off.
 
 Driven end to end in Chromium: 57 checks across the first five screens covering

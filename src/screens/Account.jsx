@@ -492,6 +492,57 @@ function Recommendations({ account, say }) {
   )
 }
 
+/**
+ * The questions the app asks while you mark things off, and whether it still
+ * asks them.
+ *
+ * Every "don't ask this again" in the app lands here, which is the deal that
+ * makes such a button safe to press: turning a prompt off is never the last
+ * word on it. These are settings of the device rather than of the account, so
+ * the section stands whether or not anyone is signed in.
+ */
+function Prompts({ account }) {
+  const rows = [
+    {
+      key: 'askPreviousSeasons',
+      primary: 'Ask about previous seasons',
+      secondary: 'when you mark a season watched with earlier seasons unwatched',
+    },
+    {
+      key: 'askPreviousEpisodes',
+      primary: 'Ask about previous episodes',
+      secondary: 'when you tick an episode with earlier ones in the season unwatched',
+    },
+  ]
+
+  return (
+    <>
+      {rows.map((row) => {
+        const on = !!account.prefs[row.key]
+        return (
+          <Row
+            key={row.key}
+            primary={row.primary}
+            secondary={row.secondary}
+            actions={
+              <button
+                className="tl-focus tl-hover-pill"
+                role="switch"
+                aria-checked={on}
+                aria-label={row.primary}
+                onClick={() => account.setPref(row.key, !on)}
+                style={on ? { ...quietButton, color: 'var(--aqua)', borderColor: 'var(--aqua)' } : quietButton}
+              >
+                {on ? 'On' : 'Off'}
+              </button>
+            }
+          />
+        )
+      })}
+    </>
+  )
+}
+
 export default function Account({ account }) {
   const [message, setMessage] = useState('')
   const signedIn = !!account.email
@@ -549,6 +600,10 @@ export default function Account({ account }) {
           </Section>
         </>
       )}
+
+      <Section label="Prompts">
+        <Prompts account={account} />
+      </Section>
 
       <div
         style={{
