@@ -54,6 +54,7 @@ import {
   usernameProblem,
 } from './lib/social.js'
 import { supabase } from './lib/supabase.js'
+import DonationBanner from './components/DonationBanner.jsx'
 import RecommendationPrompt from './components/RecommendationPrompt.jsx'
 import RecommendDialog from './components/RecommendDialog.jsx'
 import TabBar from './components/TabBar.jsx'
@@ -1738,6 +1739,9 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', background: 'var(--bg)' }}>
       <div style={{ width: '100%', maxWidth: 430, minHeight: '100vh', padding: '0 0 92px', boxSizing: 'border-box' }}>
+        {/* Above the screens rather than in them: one note, in one place, on every tab. */}
+        <DonationBanner />
+
         {!loaded && (
           <div
             style={{
