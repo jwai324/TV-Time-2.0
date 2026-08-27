@@ -99,11 +99,18 @@ reproduced as-is:
   returns the moment there is something to watch again — a new episode airs
   (unaired episodes join the list on their air date), or you un-mark the
   latest one from the title screen.
+- **Next up follows the season you are on**, not the earliest gap. If you
+  started a show at its current season, the seasons behind you were skipped,
+  not missed — so next up is the next episode of that season. They are not
+  forgotten: once the season you are on and everything after it are finished,
+  the skipped seasons become what is left to watch, and the show still reaches
+  100%.
 - Up Next fixes its order when first built and holds it, so cards never
   reshuffle while you are working down the list. Sections re-file a card
   without moving it relative to its neighbours.
 - A season opens by default when it holds your next unwatched episode — which
-  means a season you fully complete closes itself.
+  means a season you fully complete closes itself, and a show you joined
+  mid-run opens on the season you are actually watching.
 - `episodes this month` counts single-episode activity only; *Catch up* and
   *Mark season watched* log their own labels and are excluded.
 
@@ -293,6 +300,18 @@ Driven end to end in Chromium: 57 checks across the first five screens covering
 marking, catch-up, season completion, filters, all three sort orders, search by
 title and by genre, watchlist toggles, rating (including clearing it),
 persistence across a reload, empty states, and the dark theme.
+
+`nextUnwatched` and `lastWatched` are covered by 23 assertions over a
+three-season show: a viewer who starts at season three is taken through that
+season rather than back to S01E01, a gap inside the season they are on is
+still next, finishing that season hands the skipped seasons back so the show
+can reach 100%, contiguous viewing from S01E01 is unchanged, Undo remains the
+exact inverse of Mark whether or not seasons were skipped, and empty seasons
+and season-less shows return nothing instead of throwing. The same case was
+then driven in Chromium — 15 checks: the Up Next line and Mark/Undo round
+trip, the title screen opening season three with season one folded, progress
+still measured across all nine episodes, the fall back to the skipped seasons,
+and a finished show leaving Up Next at 100%.
 
 Recommending was driven in Chromium as two signed-in accounts sharing a
 stubbed project — 36 checks: the button on a film and on a show, sending with
