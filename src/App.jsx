@@ -49,6 +49,7 @@ import {
   RECOMMENDATION_NOTE_MAX,
   removeFriendship,
   removeMark,
+  removeMarks,
   sendFriendRequest,
   sendRecommendation,
   subscribeSocial,
@@ -643,6 +644,52 @@ export default function App() {
     [liveShareOf, mutate, setMarks]
   )
 
+  /**
+   * Take back a run of marks at once — the batch counterpart of
+   * `removeWatched`, and the mirror of how `addWatched` already takes a list.
+   *
+   * A season is up to a couple of dozen episodes, and undoing it a mark at a
+   * time would mean a record clone, a storage write and a network round trip
+   * each. Here the record is rewritten once and the shared rows go in one
+   * delete per kind, so the season also reaches whoever you are watching it
+   * with as the single thing that happened.
+   *
+   * `labels` is every activity entry the run could have left behind — the
+   * batch's own label and the individual marks' — because the same episodes
+   * can be reached either way, and an undo should leave the record reading as
+   * if none of it happened.
+   */
+  const removeWatchedMany = useCallback(
+    (id, entries, labels = []) => {
+      const share = liveShareOf(id)
+      const shared = share
+        ? entries
+            .map((e) => marksRef.current.find((m) => sameMark(m, { share_id: share.id, ...e })))
+            .filter(Boolean)
+        : []
+      const isShared = new Set(shared.map((m) => `${m.kind}:${m.key}`))
+      const own = entries.filter((e) => !isShared.has(`${e.kind}:${e.key}`))
+
+      mutate((u) => {
+        own.forEach((e) => unapplyMark(u, e))
+        labels.forEach((label) => withdrawActivity(u, id, label))
+      })
+
+      if (!shared.length) return
+      setMarks((prev) => prev.filter((m) => !shared.some((s) => sameMark(s, m))))
+
+      const byKind = {}
+      shared.forEach((m) => (byKind[m.kind] = [...(byKind[m.kind] || []), m.key]))
+      Promise.all(Object.entries(byKind).map(([kind, keys]) => removeMarks(share.id, kind, keys)))
+        .then(() => setSyncFailed(false))
+        .catch(() => {
+          setMarks((prev) => [...prev, ...shared.filter((s) => !prev.some((m) => sameMark(m, s)))])
+          setSyncFailed(true)
+        })
+    },
+    [liveShareOf, mutate, setMarks]
+  )
+
   /** Fetch the full record when we only hold a search/trending summary. */
   const ensureFull = useCallback(
     (id) => {
@@ -890,6 +937,27 @@ export default function App() {
       markSeasonMarks(id, seasonNumber, false)
     },
     [titles, prefs, markSeasonMarks]
+  )
+
+  /**
+   * Put a whole season back to unwatched.
+   *
+   * The inverse of *Mark season watched*, and the only way to take that button
+   * back in one move — un-ticking twenty-odd checkboxes to undo one tap is not
+   * a symmetry anyone should have to live with.
+   */
+  const unmarkSeason = useCallback(
+    (id, seasonNumber) => {
+      const season = titles[id].seasons.find((s) => s.number === seasonNumber)
+      removeWatchedMany(
+        id,
+        season.episodes.map((ep) => ({ kind: 'episode', key: episodeKey(id, seasonNumber, ep.number) })),
+        // However the season came to be watched: in one tap, or an episode at
+        // a time — including the episodes a friend marked on a shared show.
+        [`Season ${seasonNumber} watched`, ...season.episodes.map((ep) => episodeCode(seasonNumber, ep.number))]
+      )
+    },
+    [titles, removeWatchedMany]
   )
 
   /** Mark an episode and everything before it watched. */
@@ -1766,9 +1834,13 @@ export default function App() {
               title: `Season ${se.number}`,
               sub: `${watched} of ${se.episodes.length}`,
               open,
-              showMarkAll: watched < se.episodes.length,
+              // One action per season, and always the one that isn't already
+              // true of it: fill it in, or — once it is full — empty it again.
+              watchedAll: watched === se.episodes.length,
+              markLabel: watched === se.episodes.length ? 'Mark season unwatched' : 'Mark season watched',
               onToggle: () => setOpenSeasons((prev) => ({ ...prev, [key]: !open })),
-              onMarkAll: () => markSeason(t.id, se.number),
+              onMarkAll: () =>
+                watched === se.episodes.length ? unmarkSeason(t.id, se.number) : markSeason(t.id, se.number),
               episodes: open
                 ? se.episodes.map((ep) => ({
                     number: ep.number,
@@ -1800,6 +1872,7 @@ export default function App() {
     toggleStarted,
     rate,
     markSeason,
+    unmarkSeason,
     toggleEpisode,
     catchUp,
   ])

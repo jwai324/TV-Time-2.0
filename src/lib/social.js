@@ -184,6 +184,24 @@ export async function addMarks(shareId, myId, entries) {
   if (error) throw error
 }
 
+/**
+ * Delete a run of marks of one kind in a single statement.
+ *
+ * Undoing a whole season one row at a time would be a round trip per episode,
+ * and would reach the other person as a trickle rather than as the one thing
+ * that happened.
+ */
+export async function removeMarks(shareId, kind, keys) {
+  if (!keys.length) return
+  const { error } = await supabase
+    .from('shared_marks')
+    .delete()
+    .eq('share_id', shareId)
+    .eq('kind', kind)
+    .in('key', keys)
+  if (error) throw error
+}
+
 export async function removeMark(shareId, kind, key) {
   const { error } = await supabase
     .from('shared_marks')
