@@ -20,7 +20,7 @@ npm run preview  # serve the built bundle
 | --- | --- |
 | **Up Next** | Your queue in two collapsible sections — **Currently watching** over **Haven't started yet**, each split into Shows and Movies — with a one-tap **Mark watched** and an **Undo** that steps back. |
 | **Library** | Everything you track, filtered by All / Shows / Movies / Watchlist / Finished and sorted by recent activity (ties broken by the most hours left to watch), title, or progress. |
-| **Title detail** | Poster, synopsis and progress. Shows get season accordions with per-episode checkboxes, **Catch up**, and **Mark season watched** — the last two ask about the gap behind them; films get a watched toggle, **Start watching**, and a five-star rating. |
+| **Title detail** | Poster, synopsis and progress. Shows get season accordions with per-episode checkboxes, **Catch up**, and a season button that reads **Mark season watched** or **Mark season unwatched** depending on where the season stands; films get a watched toggle, **Start watching**, and a five-star rating. |
 | **Discover** | TMDB search plus this week's trending row. Watchlist pills throughout. |
 | **Stats** | Hours watched, episodes this month, current streak, titles tracked, and a top-genres chart. |
 | **Account** | Your username, your friends and the requests waiting on them, every show you are watching with someone, and the **Prompts** switches for the catch-up questions. |
@@ -132,6 +132,30 @@ And because the counts the dialog quotes are recomposed from the live record
 each render rather than frozen when it opened, a friend's mark landing on a
 shared show mid-question closes the gap and retires the question with it.
 
+### Taking a season back
+
+Every season carries exactly one button, and it is always the move that season
+is not already in: **Mark season watched** until it is full, then **Mark season
+unwatched** to take that back. Undoing a tap should cost a tap — un-ticking
+twenty-odd checkboxes to reverse one press is not a symmetry anyone should
+have to live with, and it is doubly true now that answering *Yes* to a
+catch-up question can fill in several seasons at once.
+
+Unmarking is drawn in the muted colour the app gives every other *Remove*,
+*Withdraw* and *Stop*. Aqua is reserved for the action that adds something, so
+the two buttons never read as the same offer.
+
+It clears the season however it came to be watched: in one tap, an episode at
+a time, or — on a show you are watching with someone — by episodes your friend
+marked. The activity entries it leaves behind go with it, so the streak and
+`episodes this month` read as if it never happened, and a finished show
+returns to Up Next pointing at the first episode it just gave back.
+
+Under the hood this is one write, not one per episode: `removeWatchedMany`
+rewrites the record once and `removeMarks` deletes the shared rows in a single
+statement, which is also what makes the whole season land on your friend's
+screen together rather than trickling in.
+
 ## Behaviour carried over verbatim
 
 These are deliberate choices in the design's logic, not accidents, so they are
@@ -155,7 +179,8 @@ reproduced as-is:
   mid-run opens on the season you are actually watching.
 - `episodes this month` counts single-episode activity only; *Catch up* and
   *Mark season watched* log their own labels and are excluded. A prompt
-  answered *Yes* logs as a catch-up for the same reason.
+  answered *Yes* logs as a catch-up for the same reason. *Mark season
+  unwatched* withdraws whatever the season logged, so the count falls back.
 
 ## Data
 
@@ -233,8 +258,8 @@ twice. Pair up on a title and one **Mark watched** counts for both of you.
   through one series with your partner and another with a sibling, and
   everything else stays yours.
 - **What carries across.** Watched episodes, watched films, and watchlist
-  entries on a shared title. **Catch up** and **Mark season watched** carry
-  across the same way. Star ratings stay personal — the whole point of a
+  entries on a shared title. **Catch up**, **Mark season watched** and **Mark
+  season unwatched** carry across the same way. Star ratings stay personal — the whole point of a
   rating is that it is yours.
 - **Undo is symmetric.** Un-marking an episode of a shared show takes it back
   for both of you, whoever marked it. The two records say the same thing at
@@ -346,6 +371,15 @@ star rating declares `role="radiogroup"` as the design does, with each star a
 `role="radio"` carrying `aria-checked` so the group is valid to a screen reader.
 
 ## Verification
+
+*Mark season unwatched* was driven in Chromium against a stubbed three-season
+show: a full season offers it while the others offer *Mark season watched*,
+pressing it drops 4 of 9 to 1 of 9 and leaves exactly the other seasons' marks
+in the record, the `Season 2 watched` activity entry is withdrawn with it, the
+label flips back and the state survives a reload, marking the season again
+raises the catch-up question as it should, and unmarking a season on a
+100%-complete show returns it to Up Next pointing at S01E01. Checked at 320px
+and in the dark theme with no horizontal overflow.
 
 The catch-up prompts were driven in Chromium against a stubbed three-season
 show: **Mark season watched** on season 3 raises the season question naming

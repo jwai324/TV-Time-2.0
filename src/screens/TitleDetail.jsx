@@ -443,25 +443,30 @@ export default function TitleDetail({ detail, watchTogether, dark, onBack }) {
                         {se.open ? '−' : '+'}
                       </span>
                     </button>
-                    {se.showMarkAll && (
-                      <button
-                        className="tl-focus tl-hover-line"
-                        onClick={se.onMarkAll}
-                        style={{
-                          flex: 'none',
-                          font: "400 11px 'IBM Plex Mono', monospace",
-                          color: 'var(--aqua)',
-                          background: 'none',
-                          border: '1px solid var(--line)',
-                          borderRadius: 8,
-                          padding: '8px 10px',
-                          cursor: 'pointer',
-                          minHeight: 36,
-                        }}
-                      >
-                        Mark season watched
-                      </button>
-                    )}
+                    {/*
+                      A season always offers the move it is not already in:
+                      *Mark season watched* until it is full, then *Mark season
+                      unwatched* to take that back. Undoing is drawn in the
+                      muted colour the app gives every other Remove and Stop —
+                      aqua is reserved for the action that adds something.
+                    */}
+                    <button
+                      className="tl-focus tl-hover-line"
+                      onClick={se.onMarkAll}
+                      style={{
+                        flex: 'none',
+                        font: "400 11px 'IBM Plex Mono', monospace",
+                        color: se.watchedAll ? 'var(--sub)' : 'var(--aqua)',
+                        background: 'none',
+                        border: '1px solid var(--line)',
+                        borderRadius: 8,
+                        padding: '8px 10px',
+                        cursor: 'pointer',
+                        minHeight: 36,
+                      }}
+                    >
+                      {se.markLabel}
+                    </button>
                   </div>
 
                   {se.open && (
