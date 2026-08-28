@@ -273,6 +273,10 @@ twice. Pair up on a title and one **Mark watched** counts for both of you.
   they accept, that show — and only that show — is shared. So you can work
   through one series with your partner and another with a sibling, and
   everything else stays yours.
+- **Accepting queues it.** Saying yes to an invitation puts the title on your
+  watchlist — agreeing to watch something with someone is deciding to watch
+  it. The entry is your own rather than a shared mark, so it outlives the
+  share and is yours alone to take back.
 - **What carries across.** Watched episodes, watched films, and watchlist
   entries on a shared title. **Catch up**, **Mark season watched** and **Mark
   season unwatched** carry across the same way. Star ratings stay personal — the whole point of a
