@@ -1146,6 +1146,26 @@ export default function App() {
     [refreshSocial]
   )
 
+  /**
+   * Take up an invitation to watch something together.
+   *
+   * Saying yes is a decision to watch the thing, so it joins your watchlist —
+   * exactly what accepting a recommendation does. The mark goes into your own
+   * record rather than onto the share: the share already queues the title
+   * while it is live, and what your watchlist holds should outlive it and
+   * stay yours to take back.
+   */
+  const acceptInvite = useCallback(
+    async (id) => {
+      const share = socialRef.current.shares.find((sh) => sh.id === id)
+      const error = await socialAction(() => acceptShare(id))
+      if (error) return error
+      if (share) mutate((u) => applyMark(u, { kind: 'watchlist', key: share.title_id }))
+      return null
+    },
+    [socialAction, mutate]
+  )
+
   // --- Recommendations -----------------------------------------------------
 
   /** Everything anyone has recommended to you, newest question first. */
@@ -1473,7 +1493,7 @@ export default function App() {
       sharing,
       shareInvites,
       shareRequests,
-      acceptInvite: (id) => socialAction(() => acceptShare(id)),
+      acceptInvite,
       declineInvite: (id) => socialAction(() => dropShare(id)),
       stopSharing: (id) => socialAction(() => endShare(id)),
       recommendationsWaiting: recommendRows.waiting,
@@ -1498,6 +1518,7 @@ export default function App() {
       myId,
       refreshSocial,
       socialAction,
+      acceptInvite,
       recommendRows,
       decideRec,
       dropRec,
@@ -1534,11 +1555,11 @@ export default function App() {
         await refreshSocial()
         return error || null
       },
-      onAccept: (id) => socialAction(() => acceptShare(id)),
+      onAccept: acceptInvite,
       onDecline: (id) => socialAction(() => dropShare(id)),
       onStop: (id) => socialAction(() => endShare(id)),
     }
-  }, [titleId, social.shares, friends, myId, profile, refreshSocial, socialAction])
+  }, [titleId, social.shares, friends, myId, profile, refreshSocial, socialAction, acceptInvite])
 
   // --- Derived views -------------------------------------------------------
 
