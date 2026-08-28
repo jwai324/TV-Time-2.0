@@ -108,6 +108,17 @@ const writeCollapsed = (value) => {
   }
 }
 
+/**
+ * TMDB's community score, for the lines that show it. Detail names the source
+ * so it can't be read as the viewer's own five stars; cards have room for the
+ * number alone. Titles nobody has rated carry no score and get no line.
+ */
+const votesLabel = (n) =>
+  n >= 1e6 ? `${Math.round(n / 1e5) / 10}m` : n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n)
+const scoreBadge = (t) => (t.tmdbScore ? `★ ${t.tmdbScore.toFixed(1)}` : null)
+const scoreLine = (t) =>
+  t.tmdbScore ? `TMDB ${t.tmdbScore.toFixed(1)} / 10 · ${votesLabel(t.tmdbVotes)} ratings` : ''
+
 const markSig = (m) => `${m.share_id}:${m.kind}:${m.key}`
 const sameMark = (a, b) => a.share_id === b.share_id && a.kind === b.kind && a.key === b.key
 
@@ -1814,6 +1825,7 @@ export default function App() {
         .filter(Boolean)
         .join(' · '),
       overview: t.overview,
+      tmdbScoreLine: scoreLine(t),
       progressLine: c ? `${c.watched} of ${c.total} episodes · ${pct}%` : '',
       pct,
       inWatchlist,
@@ -1898,7 +1910,12 @@ export default function App() {
       id: t.id,
       title: t,
       name: t.name,
-      meta: [t.year || null, t.type === 'show' ? 'show' : 'film', withType ? t.genres[0] : null]
+      meta: [
+        t.year || null,
+        t.type === 'show' ? 'show' : 'film',
+        withType ? t.genres[0] : null,
+        scoreBadge(t),
+      ]
         .filter(Boolean)
         .join(' · '),
       inWatchlist: user ? user.watchlist.includes(t.id) : false,

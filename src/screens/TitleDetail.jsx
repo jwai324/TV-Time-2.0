@@ -186,6 +186,23 @@ export default function TitleDetail({ detail, watchTogether, dark, onBack }) {
               >
                 {detail.meta}
               </div>
+              {detail.tmdbScoreLine && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    font: "400 11.5px 'IBM Plex Mono', monospace",
+                    color: 'var(--sub)',
+                    marginTop: 7,
+                  }}
+                >
+                  <span aria-hidden="true" style={{ color: 'var(--sun)', fontSize: 13, lineHeight: 1 }}>
+                    ★
+                  </span>
+                  {detail.tmdbScoreLine}
+                </div>
+              )}
               {detail.isShow && (
                 <div
                   style={{
