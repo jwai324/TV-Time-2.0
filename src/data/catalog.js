@@ -50,6 +50,21 @@ function trailerFrom(videos) {
     vids.find((v) => v.type === 'Teaser')
   return pick ? `https://www.youtube.com/watch?v=${pick.key}` : null
 }
+
+/**
+ * TMDB's community score, as TMDB itself shows it: one decimal out of ten,
+ * plus the number of people behind it.
+ *
+ * `vote_average` is 0 for a title nobody has rated, which would read as a
+ * real "0.0" rather than "no score yet" — so an unrated title carries no
+ * score at all and the screens leave the line out.
+ */
+function scoreFrom(r) {
+  const votes = r.vote_count ?? 0
+  if (!votes || !r.vote_average) return { tmdbScore: null, tmdbVotes: 0 }
+  return { tmdbScore: Math.round(r.vote_average * 10) / 10, tmdbVotes: votes }
+}
+
 /**
  * Today as the viewer's LOCAL calendar date. TMDB air dates are plain dates,
  * and toISOString() is UTC — which rolls to tomorrow during the US evening,
@@ -73,6 +88,7 @@ function mapMovie(m) {
     runtimeMinutes: m.runtime || 120,
     overview: m.overview || '',
     trailerUrl: trailerFrom(m.videos),
+    ...scoreFrom(m),
     seasons: [],
   }
 }
@@ -92,6 +108,7 @@ function mapShow(tv, seasonDetails) {
     runtimeMinutes: fallbackRt,
     overview: tv.overview || '',
     trailerUrl: trailerFrom(tv.videos),
+    ...scoreFrom(tv),
     seasons: seasonDetails
       // Season 0 is "Specials" — the linear progress model has no place for it.
       .filter((s) => s && s.season_number > 0)
@@ -130,6 +147,7 @@ function mapSummary(r) {
     posterUrl: r.poster_path ? IMG + r.poster_path : null,
     runtimeMinutes: type === 'movie' ? 120 : 45,
     overview: r.overview || '',
+    ...scoreFrom(r),
     seasons: [],
     partial: true,
   }
