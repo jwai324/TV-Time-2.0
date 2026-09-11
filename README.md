@@ -245,10 +245,24 @@ How the sync behaves:
 - **First sign-in adopts this device.** If the account has no record yet,
   whatever you see locally becomes the account's record. After that, the
   account is the source of truth on every device you sign in on.
-- **Every change pushes.** Mutations write localStorage first (so the app
-  never waits on the network), then upsert the record to the account. If the
-  push fails, a banner says changes are safe on this device, and the next
-  successful change re-syncs.
+- **Every change pushes, one at a time.** Mutations write localStorage first
+  (so the app never waits on the network), then upsert the whole record to
+  the account. Pushes go out one at a time, newest record next
+  (`src/lib/sync.js`): two taps in quick succession can never land in the
+  wrong order and leave the account holding the older record for the next
+  reload to adopt. A record that changes while a push is in flight goes out
+  once, after that push returns.
+- **A failed push is remembered.** The device notes under `tideline.sync.v1`
+  that it holds changes the account has not received, a banner says they are
+  safe on this device, and the push is retried with backoff and again when the
+  app comes back to the front or online. Until it lands, signing in — on a
+  reload, say — pushes the local record instead of adopting the account's
+  older one; a change made while the sign-in read is in flight is treated the
+  same way. Automatic edits to the record (folding in an ended share, logging
+  a friend's mark) wait for that read to settle, so they never rewrite a copy
+  it is about to replace. The trade-off, stated plainly: two devices on one
+  account that both hold unsynced changes do not merge — the last to sync
+  wins.
 - Account creation may ask you to confirm your email; the confirmation link's
   landing page is configured in the Supabase dashboard (Auth → URL
   Configuration), so set the Site URL there to the deployed URL if you want
@@ -292,7 +306,20 @@ twice. Pair up on a title and one **Mark watched** counts for both of you.
 - **It lands live.** A friend's mark appears within a second, over Supabase
   Realtime — no reload, no refresh. Coming back to the app re-reads the shared
   marks as well, so a socket that was asleep or blocked cannot leave you
-  behind.
+  behind. That read walks the marks in pages: the API answers a single read
+  with at most a thousand rows and says nothing when it stops short, and a
+  few long shows watched together pass that quietly — a short read would
+  have replaced the marks on screen with a subset, un-ticking the newest
+  ones every time the app was reopened.
+- **A re-read never un-ticks what you just did.** A mark or undo still in
+  flight, or one that landed after a re-read was issued, is laid over the
+  read's answer rather than lost to it; a read overtaken by a later one is
+  dropped.
+- **A friend's mark is logged once.** It joins your activity under the mark's
+  own timestamp, which is what orders Up Next and feeds the streak. Activity
+  keeps 200 entries, and a mark older than all of them has no place to land,
+  so it is left out rather than recorded, dropped and recorded again on every
+  render.
 - **Stopping is not losing.** Stop watching something together and the
   episodes you marked while sharing become yours to keep — each side folds
   its own copy in. Nothing is deleted from under anybody. You can start the
