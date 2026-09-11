@@ -221,6 +221,21 @@ export default function App() {
   const [tab, setTab] = useState('upnext')
   const [titleId, setTitleId] = useState(null)
 
+  // The order Up Next is showing right now. It is worked out once on arrival
+  // and then held, so a card never jumps out from under your thumb as you
+  // work down the list. Nulling it asks for a fresh order on the next render;
+  // arriving at the screen is what does that, so marking an episode moves the
+  // show to the front the next time you come back to the queue rather than
+  // while you are still standing in it.
+  const upOrder = useRef(null)
+  // Bumped alongside it so the cards built from that order are rebuilt too —
+  // the ref alone would change under a memo without the memo noticing.
+  const [upOrderNonce, setUpOrderNonce] = useState(0)
+  const resortUpNext = useCallback(() => {
+    upOrder.current = null
+    setUpOrderNonce((n) => n + 1)
+  }, [])
+
   const [filter, setFilter] = useState('All')
   const [sortBy, setSortBy] = useState('recent')
 
@@ -724,11 +739,15 @@ export default function App() {
     [ensureFull]
   )
 
-  const goTab = useCallback((next) => {
-    setTab(next)
-    setScreen(next)
-    setTitleId(null)
-  }, [])
+  const goTab = useCallback(
+    (next) => {
+      if (next === 'upnext') resortUpNext()
+      setTab(next)
+      setScreen(next)
+      setTitleId(null)
+    },
+    [resortUpNext]
+  )
 
   const toggleWatchlist = useCallback(
     (id) => {
@@ -1592,9 +1611,15 @@ export default function App() {
     })
   }, [titles, user, pinned, sharedTitleIds])
 
-  // Up Next is ordered by recent activity when it is first built, then holds
-  // that order so a card never jumps while you are working down the list.
-  const upOrder = useRef(null)
+  /*
+   * The order Up Next arrives in: most recent activity first, so the show you
+   * marked an episode of last leads the queue.
+   *
+   * Titles you have not touched share a timestamp of nothing, and ranking
+   * those by when they were added buries a film released this year under a
+   * watchlist five years deep. The newest release leads them instead, and the
+   * watchlist only separates two titles from the same year.
+   */
   if (loaded && user && upOrder.current === null) {
     const wlIndex = (t) => {
       const i = user.watchlist.indexOf(t.id)
@@ -1602,7 +1627,12 @@ export default function App() {
     }
     upOrder.current = queue
       .slice()
-      .sort((a, b) => lastTs(user, b.id) - lastTs(user, a.id) || wlIndex(a) - wlIndex(b))
+      .sort(
+        (a, b) =>
+          lastTs(user, b.id) - lastTs(user, a.id) ||
+          (b.year || 0) - (a.year || 0) ||
+          wlIndex(a) - wlIndex(b)
+      )
       .map((t) => t.id)
   }
   if (upOrder.current) {
@@ -1689,7 +1719,7 @@ export default function App() {
           onOpen: () => openTitle(id),
         }
       })
-  }, [queue, titles, user, anim, markNext, markMovieNext, undoLast, openTitle])
+  }, [queue, titles, user, anim, upOrderNonce, markNext, markMovieNext, undoLast, openTitle])
 
   /*
    * Up Next in two halves: what you are part-way through, then what is
@@ -2092,6 +2122,7 @@ export default function App() {
             watchTogether={watchTogether}
             dark={dark}
             onBack={() => {
+              if (tab === 'upnext') resortUpNext()
               setScreen(tab)
               setTitleId(null)
             }}
