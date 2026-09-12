@@ -34,6 +34,12 @@ button { font-family: 'Inter Tight', system-ui, sans-serif; }
   50% { transform: translateX(4px); }
 }
 
+/* The jumpscare image creeps closer for as long as it is up. */
+@keyframes scare-lunge {
+  from { transform: scale(1); }
+  to { transform: scale(1.15); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }

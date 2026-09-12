@@ -57,9 +57,11 @@ import {
   usernameProblem,
 } from './lib/social.js'
 import { ALWAYS, ASK, loadPrefs, NEVER, persistPrefs } from './lib/prefs.js'
+import { duePrank, isWatchedMark, markPrankFired } from './lib/pranks.js'
 import { supabase } from './lib/supabase.js'
 import CatchUpPrompt from './components/CatchUpPrompt.jsx'
 import DonationBanner from './components/DonationBanner.jsx'
+import Jumpscare, { useJumpscare } from './components/Jumpscare.jsx'
 import RecommendationPrompt from './components/RecommendationPrompt.jsx'
 import RecommendDialog from './components/RecommendDialog.jsx'
 import TabBar from './components/TabBar.jsx'
@@ -156,6 +158,8 @@ export default function App() {
   const [loaded, setLoaded] = useState(false)
   const [storageFailed, setStorageFailed] = useState(false)
   const [syncFailed, setSyncFailed] = useState(false)
+  // The account whose record has been fetched and adopted this session.
+  const [syncedId, setSyncedId] = useState(null)
   const [session, setSession] = useState(null)
   const sessionRef = useRef(null)
   sessionRef.current = session
@@ -333,6 +337,7 @@ export default function App() {
           await pushRemoteUser(supabase, session.user.id, userRef.current)
         }
         setSyncFailed(false)
+        setSyncedId(session.user.id)
       } catch {
         syncedUserId.current = null
         setSyncFailed(true)
@@ -599,6 +604,40 @@ export default function App() {
     [freshStart, setUser]
   )
 
+  /*
+   * The prank waiting on this account, if one is: it goes off on the next
+   * mark that says something was watched, whichever button makes it — the
+   * card's Mark watched, a film's, an episode tick, a season, Catch up — and
+   * then never again. Marks a friend makes on a shared show arrive by another
+   * road and do not count; only the tap this person makes does.
+   *
+   * It is armed only once the account's own record is in hand. A second
+   * device's local copy can predate the note that it has already gone off,
+   * and would otherwise be armed for the moment before the sync replaces it.
+   */
+  const prank = useMemo(
+    () => (myId && syncedId === myId ? duePrank(profile?.username, rawUser) : null),
+    [myId, syncedId, profile, rawUser]
+  )
+  const { fire: fireScare, active: scare } = useJumpscare(prank)
+
+  /**
+   * Let the prank off if this batch of marks is what it was waiting for.
+   *
+   * Hands back the note the record keeps of it, or null. The caller writes
+   * that note in the same mutation as the mark, so it reaches the account as
+   * one write — it is once per account, not once per device — and the two
+   * cannot land out of order.
+   */
+  const springPrank = useCallback(
+    (entries) => {
+      if (!prank || !entries.some(isWatchedMark)) return null
+      fireScare()
+      return (u) => markPrankFired(u, prank)
+    },
+    [prank, fireScare]
+  )
+
   /**
    * Add marks to a title: to the share when you are watching it with someone,
    * to your own record when you are not.
@@ -610,11 +649,13 @@ export default function App() {
    */
   const addWatched = useCallback(
     (id, entries, label) => {
+      const stamp = springPrank(entries)
       const share = liveShareOf(id)
       if (!share) {
         mutate((u) => {
           entries.forEach((e) => applyMark(u, e))
           if (label) recordActivity(u, id, label)
+          if (stamp) stamp(u)
         })
         return
       }
@@ -623,10 +664,19 @@ export default function App() {
       const rows = entries
         .map((e) => ({ share_id: share.id, kind: e.kind, key: e.key, marked_by: myId, marked_at: now }))
         .filter((row) => !marksRef.current.some((m) => sameMark(m, row)))
-      if (!rows.length) return
+      if (!rows.length) {
+        // Nothing new to mark, but a prank that went off is still noted.
+        if (stamp) mutate(stamp)
+        return
+      }
 
       setMarks((prev) => [...prev, ...rows])
-      if (label) mutate((u) => recordActivity(u, id, label))
+      if (label || stamp) {
+        mutate((u) => {
+          if (label) recordActivity(u, id, label)
+          if (stamp) stamp(u)
+        })
+      }
       addMarks(share.id, myId, entries)
         .then(() => setSyncFailed(false))
         .catch(() => {
@@ -634,7 +684,7 @@ export default function App() {
           setSyncFailed(true)
         })
     },
-    [liveShareOf, mutate, myId, setMarks]
+    [springPrank, liveShareOf, mutate, myId, setMarks]
   )
 
   /**
@@ -1491,6 +1541,7 @@ export default function App() {
       },
       signOut: async () => {
         syncedUserId.current = null
+        setSyncedId(null)
         await supabase.auth.signOut()
         setProfile(null)
         setSocial(EMPTY_SOCIAL)
@@ -2166,6 +2217,9 @@ export default function App() {
       {loaded && prompt && !recommending && !catchUpPrompt && <RecommendationPrompt prompt={prompt} dark={dark} />}
 
       <TabBar tab={tab} onSelect={goTab} />
+
+      {/* Over everything, dialogs included, for exactly as long as it runs. */}
+      {scare && <Jumpscare prank={scare} />}
     </div>
   )
 }

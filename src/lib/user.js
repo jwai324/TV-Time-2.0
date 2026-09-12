@@ -21,6 +21,7 @@ export const serializeUser = (user) => ({
   ratings: user.ratings,
   lastActivity: user.lastActivity,
   materializedShares: user.materializedShares,
+  pranks: user.pranks,
 })
 
 export const reviveUser = (p) => ({
@@ -31,6 +32,8 @@ export const reviveUser = (p) => ({
   ratings: p.ratings || {},
   lastActivity: p.lastActivity || [],
   materializedShares: p.materializedShares || [],
+  // The pranks that have gone off on this account, by key, with when.
+  pranks: p.pranks || {},
 })
 
 export const emptyUser = () => ({
@@ -41,6 +44,7 @@ export const emptyUser = () => ({
   ratings: {},
   lastActivity: [],
   materializedShares: [],
+  pranks: {},
 })
 
 /**
@@ -82,6 +86,7 @@ export const cloneUser = (u) => ({
   ratings: { ...u.ratings },
   lastActivity: [...u.lastActivity],
   materializedShares: [...u.materializedShares],
+  pranks: { ...u.pranks },
 })
 
 /**

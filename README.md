@@ -370,6 +370,39 @@ that looks like it goes somewhere. It opens in a new tab, the same as the
 trailer link — nothing about paying someone should cost you your place in the
 app.
 
+## The prank
+
+One account is due a fright. The next time **Chicalatina** marks something
+watched — the card's *Mark watched*, a film's, an episode tick, *Mark season
+watched* or *Catch up* — an image fills the screen for five seconds with a
+scream at full volume, and then never again. The mark itself goes through
+exactly as it always does; the prank is on top of it, not instead of it.
+
+The pieces live in `src/lib/pranks.js` (who it is for, which files, how
+long), `src/components/Jumpscare.jsx` (the overlay and the sound), and
+`public/scare/` (the files themselves). `scream.mp3` is in the repo; the
+picture is not yet — commit it as `public/scare/nun.jpg`, since Pages serves
+only what is in the repo, and until then the screen goes black with the
+scream rather than showing her the face. Three details worth naming:
+
+- **It fires from the tap.** Browsers only let a page start audio inside a
+  user gesture, so the sound is started from the same call that writes the
+  mark — the tap itself, or the short timer the Up Next animation sets inside
+  it — never from an effect that runs later. Both files are fetched ahead of
+  time while the prank is armed, so nothing is still loading when it goes off.
+- **Once means once per account.** The record keeps a note under
+  `user.pranks` that it has happened, written in the same mutation as the
+  mark so the two reach the account together. A second phone signed in to the
+  same account has therefore already been got, and the prank is armed only
+  after that device has adopted the account's record — never on a stale local
+  copy that predates the note.
+- **Only her own tap counts.** A friend's mark on a shared show arrives over
+  realtime, not through the mark funnel, so it cannot set it off. Signed out,
+  or signed in as anyone else, nothing is armed.
+
+Aiming another one is a new entry in `PRANKS` with a key nobody has been hit
+with yet.
+
 ## Theme
 
 The design carries `darkMode` and `freshStart` as editor props with no UI behind
