@@ -422,7 +422,12 @@ scream rather than showing her the face. Three details worth naming:
   mark so the two reach the account together. A second phone signed in to the
   same account has therefore already been got, and the prank is armed only
   after that device has adopted the account's record — never on a stale local
-  copy that predates the note.
+  copy that predates the note. The note is also kept when a device adopts an
+  account row that lacks it (a push that failed, or a whole-record push from a
+  session that was open before it went off), and the row is told again. The
+  one gap, stated plainly: a session of hers that was already open elsewhere
+  when it went off is not told, so a mark made there before that session
+  reloads sets it off there too.
 - **Only her own tap counts.** A friend's mark on a shared show arrives over
   realtime, not through the mark funnel, so it cannot set it off. Signed out,
   or signed in as anyone else, nothing is armed.

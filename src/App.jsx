@@ -59,7 +59,7 @@ import {
   usernameProblem,
 } from './lib/social.js'
 import { ALWAYS, ASK, loadPrefs, NEVER, persistPrefs } from './lib/prefs.js'
-import { duePrank, isWatchedMark, markPrankFired } from './lib/pranks.js'
+import { carryPrankNotes, duePrank, isWatchedMark, markPrankFired } from './lib/pranks.js'
 import { supabase } from './lib/supabase.js'
 import { clearUnsynced, createPusher, hasUnsyncedChanges } from './lib/sync.js'
 import CatchUpPrompt from './components/CatchUpPrompt.jsx'
@@ -388,9 +388,13 @@ export default function App() {
           // Edited while reading: that edit is already on its way up, and the
           // record it left behind is newer than what came back.
         } else if (remote) {
+          // A prank that went off on this device stays gone off, even if
+          // the account's row missed the note; the row is told again.
+          const carried = carryPrankNotes(userRef.current, remote)
           setUser(remote)
           persistUser(remote, { freshStart })
           clearUnsynced()
+          if (carried) pusher.schedule(userId, remote)
         } else {
           pusher.schedule(userId, userRef.current)
         }

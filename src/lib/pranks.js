@@ -46,3 +46,24 @@ export function duePrank(username, user) {
 export function markPrankFired(user, prank) {
   user.pranks[prank.key] = new Date().toISOString()
 }
+
+/**
+ * Carry the notes one record holds into another that lacks them. True when
+ * anything was carried.
+ *
+ * A note is a fact about the account — it went off — and the only way to
+ * write one is to be the account it names. So when a device adopts the
+ * account's record, any note its own copy holds is kept rather than lost to
+ * a row that missed it: a push that failed, or a push from a session that
+ * was open before the note existed and wrote the whole record without it.
+ */
+export function carryPrankNotes(from, into) {
+  if (!from) return false
+  let carried = false
+  Object.entries(from.pranks).forEach(([key, when]) => {
+    if (into.pranks[key]) return
+    into.pranks[key] = when
+    carried = true
+  })
+  return carried
+}

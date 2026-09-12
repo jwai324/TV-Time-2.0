@@ -3,6 +3,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { asset } from '../lib/pranks.js'
 
 /**
+ * Silence a sound and let go of it. Pausing alone leaves a paused "Tideline"
+ * control in the phone's media tray, pointing straight at the app; dropping
+ * the source releases it.
+ */
+const stop = (sound) => {
+  sound.pause()
+  sound.removeAttribute('src')
+  sound.load()
+}
+
+/**
  * Hold a prank ready, and let it off.
  *
  * `fire` plays the sound and puts the image up; `active` is the prank while
@@ -15,7 +26,8 @@ import { asset } from '../lib/pranks.js'
  */
 export function useJumpscare(prank) {
   const [active, setActive] = useState(null)
-  const audio = useRef(null)
+  const armed = useRef(null)
+  const playing = useRef(null)
   const timer = useRef(null)
 
   useEffect(() => {
@@ -25,17 +37,27 @@ export function useJumpscare(prank) {
     const sound = new Audio(asset(prank.sound))
     sound.preload = 'auto'
     sound.load()
-    audio.current = sound
+    armed.current = sound
     return () => {
-      audio.current = null
+      armed.current = null
     }
   }, [prank])
 
-  useEffect(() => () => clearTimeout(timer.current), [])
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current)
+      if (playing.current) stop(playing.current)
+    },
+    []
+  )
 
   const fire = useCallback(() => {
     if (!prank) return
-    const sound = audio.current || new Audio(asset(prank.sound))
+    // Let off twice in quick succession, it starts over rather than doubling up.
+    if (playing.current) stop(playing.current)
+    const sound = armed.current || new Audio(asset(prank.sound))
+    armed.current = null
+    playing.current = sound
     sound.currentTime = 0
     sound.volume = 1
     sound.play().catch(() => {
@@ -44,7 +66,8 @@ export function useJumpscare(prank) {
     setActive(prank)
     clearTimeout(timer.current)
     timer.current = setTimeout(() => {
-      sound.pause()
+      stop(sound)
+      playing.current = null
       setActive(null)
     }, prank.durationMs)
   }, [prank])
