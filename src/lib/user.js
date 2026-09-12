@@ -126,10 +126,16 @@ export function withSharedMarks(user, marks) {
   return merged
 }
 
+/** Activity keeps this many entries; anything older falls off the end. */
+export const ACTIVITY_CAP = 200
+
+/** The key a shared mark is logged under, so it is recognised on sight. */
+export const markSig = (m) => `${m.share_id}:${m.kind}:${m.key}`
+
 /** Record an activity entry. Newest first, capped so storage cannot grow forever. */
 export function recordActivity(user, titleId, label) {
   user.lastActivity.unshift({ ts: Date.now(), titleId, label })
-  user.lastActivity = user.lastActivity.slice(0, 200)
+  user.lastActivity = user.lastActivity.slice(0, ACTIVITY_CAP)
 }
 
 /**
@@ -145,7 +151,28 @@ export function recordSharedActivity(user, entries) {
   if (!entries.length) return
   user.lastActivity = [...user.lastActivity, ...entries]
     .sort((a, b) => b.ts - a.ts)
-    .slice(0, 200)
+    .slice(0, ACTIVITY_CAP)
+}
+
+/**
+ * A friend's marks on live shares that still need logging as activity.
+ *
+ * The list is capped, so a mark older than everything in a full list has
+ * nowhere to land: recording it would sort it straight off the end, it would
+ * look unlogged again on the next render, and the record would be rewritten
+ * and pushed to the account on every render, forever. Those are left alone —
+ * they were never going to show — and only marks that would actually take a
+ * place in the list come back. Once logged, a mark is known by its `sk`.
+ */
+export function unloggedSharedMarks(user, marks, myId) {
+  const logged = new Set(user.lastActivity.map((a) => a.sk).filter(Boolean))
+  const stamps = user.lastActivity.map((a) => a.ts).filter(Number.isFinite)
+  const floor = user.lastActivity.length >= ACTIVITY_CAP && stamps.length ? Math.min(...stamps) : -Infinity
+  return marks.filter((m) => {
+    if (m.kind !== 'episode' || m.marked_by === myId || logged.has(markSig(m))) return false
+    const ts = new Date(m.marked_at).getTime()
+    return Number.isFinite(ts) && ts > floor
+  })
 }
 
 /**
