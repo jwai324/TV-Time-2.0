@@ -20,11 +20,13 @@ import {
   episodeKey,
   fetchRemoteUser,
   loadUser,
+  markSig,
   persistUser,
   pushRemoteUser,
   recordActivity,
   recordSharedActivity,
   unapplyMark,
+  unloggedSharedMarks,
   withSharedMarks,
   withdrawActivity,
 } from './lib/user.js'
@@ -58,6 +60,7 @@ import {
 } from './lib/social.js'
 import { ALWAYS, ASK, loadPrefs, NEVER, persistPrefs } from './lib/prefs.js'
 import { supabase } from './lib/supabase.js'
+import { clearUnsynced, createPusher, hasUnsyncedChanges } from './lib/sync.js'
 import CatchUpPrompt from './components/CatchUpPrompt.jsx'
 import DonationBanner from './components/DonationBanner.jsx'
 import RecommendationPrompt from './components/RecommendationPrompt.jsx'
@@ -119,7 +122,6 @@ const scoreBadge = (t) => (t.tmdbScore ? `★ ${t.tmdbScore.toFixed(1)}` : null)
 const scoreLine = (t) =>
   t.tmdbScore ? `TMDB ${t.tmdbScore.toFixed(1)} / 10 · ${votesLabel(t.tmdbVotes)} ratings` : ''
 
-const markSig = (m) => `${m.share_id}:${m.kind}:${m.key}`
 const sameMark = (a, b) => a.share_id === b.share_id && a.kind === b.kind && a.key === b.key
 
 const EMPTY_SOCIAL = { friendships: [], shares: [], names: {}, marks: [], recommendations: [] }
@@ -171,6 +173,24 @@ export default function App() {
     setUserState(next)
   }, [])
 
+  /*
+   * Pushes to the account go through one line: a push waits for the one
+   * before it, and the newest record is what goes next, so two pushes can
+   * never land in the wrong order. `localGen` counts local edits, which lets
+   * the sign-in read tell whether the record moved while it was in flight.
+   */
+  const pusher = useMemo(
+    () => createPusher((userId, u) => pushRemoteUser(supabase, userId, u), (ok) => setSyncFailed(!ok)),
+    []
+  )
+  const localGen = useRef(0)
+
+  // Which account this device's record is known to belong to. Until the
+  // sign-in round-trip settles, the record on screen may be an older copy,
+  // so automatic edits to it wait — see `accountSettled` below.
+  const [syncedFor, setSyncedFor] = useState(null)
+  const syncingFor = useRef(null)
+
   // Friends, the shows you are watching with them, and the marks those shows
   // carry. `names` maps an account id to its username.
   const [profile, setProfile] = useState(null)
@@ -210,6 +230,30 @@ export default function App() {
   marksRef.current = social.marks
 
   const setMarks = useCallback((fn) => setSocial((prev) => ({ ...prev, marks: fn(prev.marks) })), [])
+
+  /*
+   * What this device knows about marks that a server read may not show yet:
+   * an optimistic mark or undo still in flight, or one that landed after the
+   * read was issued. A re-read replaces the marks wholesale, so without this
+   * it could un-tick an episode you had just marked — until the read after.
+   * Each entry remembers the refresh epoch it settled in; the first read
+   * issued after that can be trusted over it, and the entry is let go.
+   */
+  const touched = useRef(new Map())
+  const refreshEpoch = useRef(0)
+  const appliedEpoch = useRef(0)
+
+  const noteMark = useCallback((row, present, settled) => {
+    touched.current.set(markSig(row), { row, present, settled: settled ? refreshEpoch.current : null })
+  }, [])
+
+  const settleMark = useCallback((row, ok) => {
+    const sig = markSig(row)
+    const t = touched.current.get(sig)
+    if (!t) return
+    if (ok) t.settled = refreshEpoch.current
+    else touched.current.delete(sig)
+  }, [])
 
   /** The live share on a title, or null when it is yours alone. */
   const liveShareOf = useCallback(
@@ -316,29 +360,58 @@ export default function App() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  // On sign-in, the account's record becomes the source of truth. A first
-  // sign-in has no row yet, so whatever is on this device seeds the account.
-  const syncedUserId = useRef(null)
-  useEffect(() => {
-    if (!loaded || !session || freshStart) return
-    if (syncedUserId.current === session.user.id) return
-    syncedUserId.current = session.user.id
-    ;(async () => {
-      try {
+  /*
+   * On sign-in, the account's record becomes the source of truth — with two
+   * exceptions that keep this device's changes from being thrown away. A
+   * first sign-in has no row yet, so whatever is on this device seeds the
+   * account. And a device holding changes the account never received — a
+   * push that failed, or an edit made while this read was in flight — pushes
+   * its record instead of adopting the older one.
+   *
+   * A read that fails is tried again when the app comes back to the front.
+   */
+  const adoptAccount = useCallback(async () => {
+    const s = sessionRef.current
+    if (!loaded || !s || freshStart) return
+    const userId = s.user.id
+    if (syncingFor.current === userId) return
+    syncingFor.current = userId
+    try {
+      if (hasUnsyncedChanges(userId)) {
+        pusher.schedule(userId, userRef.current)
+      } else {
+        const gen = localGen.current
         const remote = await fetchRemoteUser(supabase)
-        if (remote) {
+        if (localGen.current !== gen) {
+          // Edited while reading: that edit is already on its way up, and the
+          // record it left behind is newer than what came back.
+        } else if (remote) {
           setUser(remote)
           persistUser(remote, { freshStart })
+          clearUnsynced()
         } else {
-          await pushRemoteUser(supabase, session.user.id, userRef.current)
+          pusher.schedule(userId, userRef.current)
         }
         setSyncFailed(false)
-      } catch {
-        syncedUserId.current = null
-        setSyncFailed(true)
       }
-    })()
-  }, [loaded, session, freshStart, setUser])
+      setSyncedFor(userId)
+    } catch {
+      syncingFor.current = null
+      setSyncFailed(true)
+    }
+  }, [loaded, freshStart, pusher, setUser])
+
+  useEffect(() => {
+    adoptAccount()
+  }, [adoptAccount, session])
+
+  /*
+   * Whether the record on screen is known to be the account's. Automatic
+   * edits — folding in an ended share, logging a friend's mark — wait for
+   * this, so they never rewrite (and push) a copy the sign-in read is about
+   * to replace. Guests and demo runs have no account to wait on.
+   */
+  const accountSettled = !session || freshStart || syncedFor === myId
 
   // The username, once there is an account to hang it on. A username typed at
   // sign-up is claimed here, after the confirmation round-trip brings a
@@ -347,6 +420,12 @@ export default function App() {
     if (!session) {
       setProfile(null)
       setSocial(EMPTY_SOCIAL)
+      // Nothing to push to. A record still flagged as unsynced is pushed the
+      // next time its account signs in here.
+      pusher.reset()
+      touched.current.clear()
+      syncingFor.current = null
+      setSyncedFor(null)
       return
     }
     let cancelled = false
@@ -366,15 +445,23 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [session])
+  }, [session, pusher])
 
-  /** Re-read friends, shares and marks. Every social action ends here. */
+  /**
+   * Re-read friends, shares and marks. Every social action ends here.
+   *
+   * Reads can overlap — a focus, a friend's action and a tap of your own can
+   * each start one — so each is numbered, a read overtaken by a later one is
+   * dropped, and what this device knows to be newer than the read (see
+   * `touched`) is laid over the answer.
+   */
   const refreshSocial = useCallback(async () => {
     const s = sessionRef.current
     if (!s) {
       setSocial(EMPTY_SOCIAL)
       return
     }
+    const epoch = ++refreshEpoch.current
     try {
       const [friendships, shares, recommendations] = await Promise.all([
         fetchFriendships(),
@@ -397,11 +484,25 @@ export default function App() {
       ids.delete(s.user.id)
       // Marks are read for ended shares too — that is what lets each side
       // keep its own copy of what you watched together.
-      const [names, marks] = await Promise.all([
+      const [names, fetched] = await Promise.all([
         fetchProfiles([...ids]),
         fetchMarks(shares.filter((sh) => sh.status !== 'pending').map((sh) => sh.id)),
       ])
-      setSocial({ friendships, shares, names, marks, recommendations })
+      if (epoch < appliedEpoch.current) return
+      appliedEpoch.current = epoch
+
+      const marks = new Map(fetched.map((m) => [markSig(m), m]))
+      touched.current.forEach((t, sig) => {
+        // Settled before this read was issued: the server's answer covers it.
+        if (t.settled != null && t.settled < epoch) {
+          touched.current.delete(sig)
+          return
+        }
+        if (t.present) marks.set(sig, marks.get(sig) || t.row)
+        else marks.delete(sig)
+      })
+
+      setSocial({ friendships, shares, names, marks: [...marks.values()], recommendations })
       setSyncFailed(false)
     } catch {
       setSyncFailed(true)
@@ -417,10 +518,15 @@ export default function App() {
    * A friend's mark should land while you are both watching, not on next
    * load. Marks arrive already applied; anything else about the friendship
    * just triggers a re-read.
+   *
+   * The channel is keyed by the share ids rather than the share rows, so a
+   * re-read that changes nothing does not tear it down and put it back up.
    */
+  const liveShareKey = useMemo(() => liveShares.map((sh) => sh.id).sort().join(','), [liveShares])
+  const hasProfile = !!profile
   useEffect(() => {
-    if (!myId || !profile) return
-    const shareIds = liveShares.map((sh) => sh.id)
+    if (!myId || !hasProfile) return
+    const shareIds = liveShareKey ? liveShareKey.split(',') : []
     return subscribeSocial({
       userId: myId,
       shareIds,
@@ -428,15 +534,17 @@ export default function App() {
         if (payload.eventType === 'DELETE') {
           const gone = payload.old
           if (!gone?.share_id) return
+          noteMark(gone, false, true)
           setMarks((prev) => prev.filter((m) => !sameMark(m, gone)))
         } else if (payload.new) {
           const row = payload.new
+          noteMark(row, true, true)
           setMarks((prev) => (prev.some((m) => sameMark(m, row)) ? prev : [...prev, row]))
         }
       },
       onSocial: () => refreshSocial(),
     })
-  }, [myId, profile, liveShares, refreshSocial, setMarks])
+  }, [myId, hasProfile, liveShareKey, refreshSocial, setMarks, noteMark])
 
   /*
    * Realtime is the fast path, not the only one. A socket that was asleep,
@@ -451,12 +559,36 @@ export default function App() {
       refreshSocial()
     }
     window.addEventListener('focus', refresh)
+    window.addEventListener('online', refresh)
     document.addEventListener('visibilitychange', refresh)
     return () => {
       window.removeEventListener('focus', refresh)
+      window.removeEventListener('online', refresh)
       document.removeEventListener('visibilitychange', refresh)
     }
   }, [profile, refreshSocial])
+
+  /*
+   * The account line comes back with the app too: a push that failed while
+   * the phone was asleep, or a sign-in read that never finished, is tried
+   * again here rather than waiting for the next tap.
+   */
+  useEffect(() => {
+    if (!session) return
+    const retry = () => {
+      if (document.visibilityState !== 'visible') return
+      pusher.flush()
+      adoptAccount()
+    }
+    window.addEventListener('focus', retry)
+    window.addEventListener('online', retry)
+    document.addEventListener('visibilitychange', retry)
+    return () => {
+      window.removeEventListener('focus', retry)
+      window.removeEventListener('online', retry)
+      document.removeEventListener('visibilitychange', retry)
+    }
+  }, [session, pusher, adoptAccount])
 
   /*
    * A share that has ended stops being shared and starts being yours: its
@@ -465,7 +597,7 @@ export default function App() {
    * neither of you loses an episode when you stop watching together.
    */
   useEffect(() => {
-    if (!loaded || !rawUser || !myId || freshStart) return
+    if (!loaded || !rawUser || !myId || freshStart || !accountSettled) return
     const ended = social.shares.filter(
       (sh) => sh.status === 'ended' && !rawUser.materializedShares.includes(sh.id)
     )
@@ -476,35 +608,30 @@ export default function App() {
       ended.forEach((sh) => u.materializedShares.push(sh.id))
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, rawUser, myId, freshStart, social.shares, social.marks])
+  }, [loaded, rawUser, myId, freshStart, accountSettled, social.shares, social.marks])
 
   /*
    * A friend marking an episode makes it watched for you, so it belongs in
    * your activity too — that is what orders Up Next and feeds the streak.
-   * Marks you made yourself were logged when you made them.
+   * Marks you made yourself were logged when you made them. A mark too old
+   * to take a place in the capped list is left out (`unloggedSharedMarks`),
+   * otherwise this effect would rewrite the record on every render.
    */
   useEffect(() => {
-    if (!loaded || !rawUser || !myId) return
-    const logged = new Set(rawUser.lastActivity.map((a) => a.sk).filter(Boolean))
-    const fresh = liveMarks.filter(
-      (m) => m.kind === 'episode' && m.marked_by !== myId && !logged.has(markSig(m))
-    )
-    if (!fresh.length) return
-    const entries = fresh
-      .map((m) => {
-        const [id, season, episode] = m.key.split(':')
-        return {
-          ts: new Date(m.marked_at).getTime(),
-          titleId: id,
-          label: episodeCode(Number(season), Number(episode)),
-          sk: markSig(m),
-        }
-      })
-      .filter((e) => Number.isFinite(e.ts))
+    if (!loaded || !rawUser || !myId || !accountSettled) return
+    const entries = unloggedSharedMarks(rawUser, liveMarks, myId).map((m) => {
+      const [id, season, episode] = m.key.split(':')
+      return {
+        ts: new Date(m.marked_at).getTime(),
+        titleId: id,
+        label: episodeCode(Number(season), Number(episode)),
+        sk: markSig(m),
+      }
+    })
     if (!entries.length) return
     mutate((u) => recordSharedActivity(u, entries))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, rawUser, myId, liveMarks])
+  }, [loaded, rawUser, myId, accountSettled, liveMarks])
 
   // Load the user, then resolve every title they have a relationship with.
   useEffect(() => {
@@ -582,21 +709,22 @@ export default function App() {
     })
   }, [loaded, user, titles, social.shares, social.recommendations])
 
-  /** Apply a mutation to a fresh copy of the user, then persist it. */
+  /**
+   * Apply a mutation to a fresh copy of the user, then persist it: to this
+   * device first, so the app never waits on the network, then to the account
+   * through the one push line, so pushes land in the order they were made.
+   */
   const mutate = useCallback(
     (fn) => {
       const next = cloneUser(userRef.current)
       fn(next)
+      localGen.current += 1
       setUser(next)
       if (!persistUser(next, { freshStart })) setStorageFailed(true)
       const s = sessionRef.current
-      if (s && !freshStart) {
-        pushRemoteUser(supabase, s.user.id, next)
-          .then(() => setSyncFailed(false))
-          .catch(() => setSyncFailed(true))
-      }
+      if (s && !freshStart) pusher.schedule(s.user.id, next)
     },
-    [freshStart, setUser]
+    [freshStart, setUser, pusher]
   )
 
   /**
@@ -625,16 +753,21 @@ export default function App() {
         .filter((row) => !marksRef.current.some((m) => sameMark(m, row)))
       if (!rows.length) return
 
+      rows.forEach((row) => noteMark(row, true, false))
       setMarks((prev) => [...prev, ...rows])
       if (label) mutate((u) => recordActivity(u, id, label))
       addMarks(share.id, myId, entries)
-        .then(() => setSyncFailed(false))
+        .then(() => {
+          rows.forEach((row) => settleMark(row, true))
+          setSyncFailed(false)
+        })
         .catch(() => {
+          rows.forEach((row) => settleMark(row, false))
           setMarks((prev) => prev.filter((m) => !rows.some((row) => sameMark(row, m))))
           setSyncFailed(true)
         })
     },
-    [liveShareOf, mutate, myId, setMarks]
+    [liveShareOf, mutate, myId, setMarks, noteMark, settleMark]
   )
 
   /**
@@ -658,16 +791,21 @@ export default function App() {
         return
       }
 
+      noteMark(shared, false, false)
       setMarks((prev) => prev.filter((m) => !sameMark(m, shared)))
       if (label) mutate((u) => withdrawActivity(u, id, label, markSig(shared)))
       removeMark(share.id, entry.kind, entry.key)
-        .then(() => setSyncFailed(false))
+        .then(() => {
+          settleMark(shared, true)
+          setSyncFailed(false)
+        })
         .catch(() => {
+          settleMark(shared, false)
           setMarks((prev) => (prev.some((m) => sameMark(m, shared)) ? prev : [...prev, shared]))
           setSyncFailed(true)
         })
     },
-    [liveShareOf, mutate, setMarks]
+    [liveShareOf, mutate, setMarks, noteMark, settleMark]
   )
 
   /**
@@ -702,18 +840,23 @@ export default function App() {
       })
 
       if (!shared.length) return
+      shared.forEach((m) => noteMark(m, false, false))
       setMarks((prev) => prev.filter((m) => !shared.some((s) => sameMark(s, m))))
 
       const byKind = {}
       shared.forEach((m) => (byKind[m.kind] = [...(byKind[m.kind] || []), m.key]))
       Promise.all(Object.entries(byKind).map(([kind, keys]) => removeMarks(share.id, kind, keys)))
-        .then(() => setSyncFailed(false))
+        .then(() => {
+          shared.forEach((m) => settleMark(m, true))
+          setSyncFailed(false)
+        })
         .catch(() => {
+          shared.forEach((m) => settleMark(m, false))
           setMarks((prev) => [...prev, ...shared.filter((s) => !prev.some((m) => sameMark(m, s)))])
           setSyncFailed(true)
         })
     },
-    [liveShareOf, mutate, setMarks]
+    [liveShareOf, mutate, setMarks, noteMark, settleMark]
   )
 
   /** Fetch the full record when we only hold a search/trending summary. */
@@ -1490,7 +1633,13 @@ export default function App() {
         return null
       },
       signOut: async () => {
-        syncedUserId.current = null
+        // Get the last change out before the session goes — but not at any
+        // price: if it cannot go in a few seconds, the record stays flagged
+        // and is pushed the next time this account signs in here.
+        await Promise.race([pusher.flush(), new Promise((r) => setTimeout(r, 4000))])
+        pusher.reset()
+        syncingFor.current = null
+        setSyncedFor(null)
         await supabase.auth.signOut()
         setProfile(null)
         setSocial(EMPTY_SOCIAL)
@@ -1546,6 +1695,7 @@ export default function App() {
       shareInvites,
       shareRequests,
       myId,
+      pusher,
       refreshSocial,
       socialAction,
       acceptInvite,

@@ -165,14 +165,38 @@ export async function endShare(id) {
 
 // --- shared marks ----------------------------------------------------------
 
-export async function fetchMarks(shareIds) {
+/** Marks are read this many at a time — the most the API returns per request. */
+const MARKS_PAGE = 1000
+
+/**
+ * Every mark on these shares.
+ *
+ * The API answers a read with at most a thousand rows, however many match,
+ * and says nothing when it stops short. Two people who have watched a few
+ * long shows together pass that quietly — and a read that came back short
+ * would replace the marks on screen with a subset, un-ticking whatever fell
+ * past the cut the moment the app was reopened. So the read walks the rows in
+ * pages, in primary-key order so nothing is skipped or seen twice, until the
+ * count the server reports alongside each page has been reached.
+ */
+export async function fetchMarks(shareIds, client = supabase) {
   if (!shareIds.length) return []
-  const { data, error } = await supabase
-    .from('shared_marks')
-    .select('share_id, kind, key, marked_by, marked_at')
-    .in('share_id', shareIds)
-  if (error) throw error
-  return data || []
+  const rows = []
+  for (;;) {
+    const { data, error, count } = await client
+      .from('shared_marks')
+      .select('share_id, kind, key, marked_by, marked_at', { count: 'exact' })
+      .in('share_id', shareIds)
+      .order('share_id')
+      .order('kind')
+      .order('key')
+      .range(rows.length, rows.length + MARKS_PAGE - 1)
+    if (error) throw error
+    const page = data || []
+    rows.push(...page)
+    const done = !page.length || (count == null ? page.length < MARKS_PAGE : rows.length >= count)
+    if (done) return rows
+  }
 }
 
 export async function addMarks(shareId, myId, entries) {
