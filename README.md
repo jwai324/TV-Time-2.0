@@ -280,6 +280,14 @@ How the sync behaves:
   members of the project's organization, a few emails an hour — anyone else
   gets *Email address not authorized*.
 
+The project is on Supabase's free plan, which pauses a project after 7 days
+without traffic. A paused project takes the `tmdb` proxy down with it, so the
+site hangs on "Loading…" or opens with no titles. Restore it from the
+Supabase dashboard; `.github/workflows/keep-supabase-awake.yml` reads from it
+every 3 days so it never goes idle long enough to pause. GitHub turns off
+scheduled workflows in a repo with no commits for 60 days (it emails first),
+so after a long quiet spell, re-enable it from the Actions tab.
+
 ## Friends, and watching a show together
 
 Two people who follow the same show should not have to mark every episode
