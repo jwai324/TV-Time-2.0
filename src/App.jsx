@@ -60,7 +60,7 @@ import {
 } from './lib/social.js'
 import { ALWAYS, ASK, loadPrefs, NEVER, persistPrefs } from './lib/prefs.js'
 import { carryPrankNotes, duePrank, isWatchedMark, markPrankFired } from './lib/pranks.js'
-import { supabase } from './lib/supabase.js'
+import { arrivedFromRecovery, linkError, supabase } from './lib/supabase.js'
 import { clearUnsynced, createPusher, hasUnsyncedChanges } from './lib/sync.js'
 import CatchUpPrompt from './components/CatchUpPrompt.jsx'
 import DonationBanner from './components/DonationBanner.jsx'
@@ -161,6 +161,10 @@ export default function App() {
   const [storageFailed, setStorageFailed] = useState(false)
   const [syncFailed, setSyncFailed] = useState(false)
   const [session, setSession] = useState(null)
+  // Signed in by a password-reset link, and not yet past choosing the new one.
+  const [recovering, setRecovering] = useState(arrivedFromRecovery)
+  // Why an email link did not work, shown once on the Account tab it opens.
+  const [linkNote, setLinkNote] = useState(linkError)
   const sessionRef = useRef(null)
   sessionRef.current = session
   const [titles, setTitles] = useState({})
@@ -263,8 +267,10 @@ export default function App() {
     []
   )
 
-  const [screen, setScreen] = useState('upnext')
-  const [tab, setTab] = useState('upnext')
+  // An email link that came back for the account opens on the Account tab,
+  // where its new-password form or its error is waiting.
+  const [screen, setScreen] = useState(arrivedFromRecovery || linkError ? 'account' : 'upnext')
+  const [tab, setTab] = useState(arrivedFromRecovery || linkError ? 'account' : 'upnext')
   const [titleId, setTitleId] = useState(null)
 
   // The order Up Next is showing right now. It is worked out once on arrival
@@ -358,7 +364,11 @@ export default function App() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => setSession(next))
+    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
+      setSession(next)
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true)
+      if (event === 'SIGNED_OUT') setRecovering(false)
+    })
     return () => sub.subscription.unsubscribe()
   }, [])
 
@@ -937,6 +947,7 @@ export default function App() {
   const goTab = useCallback(
     (next) => {
       if (next === 'upnext') resortUpNext()
+      setLinkNote(null)
       setTab(next)
       setScreen(next)
       setTitleId(null)
@@ -1684,6 +1695,22 @@ export default function App() {
         }
         return null
       },
+      // Supabase does not say whether the address has an account, so the card
+      // does not either.
+      sendReset: async (email) => {
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+          redirectTo: window.location.origin + window.location.pathname,
+        })
+        return error ? error.message : null
+      },
+      recovering,
+      linkError: linkNote,
+      setPassword: async (password) => {
+        const { error } = await supabase.auth.updateUser({ password })
+        if (error) return error.message
+        setRecovering(false)
+        return null
+      },
       signOut: async () => {
         // Get the last change out before the session goes — but not at any
         // price: if it cannot go in a few seconds, the record stays flagged
@@ -1740,6 +1767,8 @@ export default function App() {
     [
       session,
       profile,
+      recovering,
+      linkNote,
       friends,
       incomingRequests,
       outgoingRequests,
