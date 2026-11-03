@@ -268,6 +268,25 @@ How the sync behaves:
   Configuration), so set the Site URL there to the deployed URL if you want
   that link to land somewhere sensible. The username you picked at sign-up is
   held until that round-trip brings a session back, then claimed.
+- **A forgotten password is reset by email.** *Forgot password?* on the
+  sign-in card asks Supabase for a reset link that comes back to the page it
+  was requested from. The link signs you in and opens the Account tab on a
+  new-password form; saving it puts the card back to the signed-in row. An
+  expired or already-used link opens the same tab with Supabase's reason, once.
+  Two dashboard settings decide whether this works: the deployed URL
+  (`https://jwai324.github.io/TV-Time-2.0/`) must be the Site URL or on the
+  Redirect URLs list (Auth → URL Configuration), or the link lands on the Site
+  URL instead; and without a custom SMTP server, Supabase sends only to
+  members of the project's organization, a few emails an hour — anyone else
+  gets *Email address not authorized*.
+
+The project is on Supabase's free plan, which pauses a project after 7 days
+without traffic. A paused project takes the `tmdb` proxy down with it, so the
+site hangs on "Loading…" or opens with no titles. Restore it from the
+Supabase dashboard; `.github/workflows/keep-supabase-awake.yml` reads from it
+every 3 days so it never goes idle long enough to pause. GitHub turns off
+scheduled workflows in a repo with no commits for 60 days (it emails first),
+so after a long quiet spell, re-enable it from the Actions tab.
 
 ## Friends, and watching a show together
 
@@ -492,6 +511,16 @@ Driven end to end in Chromium: 57 checks across the first five screens covering
 marking, catch-up, season completion, filters, all three sort orders, search by
 title and by genre, watchlist toggles, rating (including clearing it),
 persistence across a reload, empty states, and the dark theme.
+
+The forgot-password flow was driven in Chromium against a mocked Supabase
+project — 23 checks: *Forgot password?* shows on the sign-in card at a 44px
+target, reset mode drops the password field, the request carries the trimmed
+address and a redirect back to the page, and *Back to sign in* restores the
+card. A recovery link opens on the Account tab naming the account, leaves no
+token in the URL, sends the new password, and returns the card to the
+signed-in row, which a reload keeps. An expired link opens on Account with its
+reason, clears it from the URL, and shows it once. A plain visit still opens on
+Up Next, and reset mode has no horizontal overflow at 320px in the dark theme.
 
 The donation banner was checked in Chromium — 13 checks: the exact copy, that
 it is present before the app has loaded, that it sits at the top of all five

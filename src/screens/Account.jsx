@@ -50,6 +50,16 @@ const quietButton = {
   minHeight: 38,
 }
 
+const linkButton = {
+  font: "500 12.5px 'Inter Tight', sans-serif",
+  color: 'var(--aqua)',
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  cursor: 'pointer',
+  minHeight: 44,
+}
+
 const noteStyle = { font: "400 11.5px 'IBM Plex Mono', monospace", color: 'var(--sub)', marginTop: 10 }
 const mutedStyle = { font: "400 12.5px 'Inter Tight', sans-serif", color: 'var(--sub)' }
 
@@ -98,7 +108,10 @@ function Row({ primary, secondary, actions, onOpen }) {
   )
 }
 
-/** Sign in, or create an account and take a username at the same time. */
+/**
+ * Sign in, create an account and take a username at the same time, or ask for
+ * a link to choose a new password.
+ */
 function SignedOut({ account, say }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -106,19 +119,30 @@ function SignedOut({ account, say }) {
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState('in')
 
+  const switchTo = (next) => {
+    setMode(next)
+    say('')
+  }
+
   const submit = async () => {
     setBusy(true)
     say('')
-    const err = mode === 'in' ? await account.signIn(email, password) : await account.signUp(email, password, username)
+    const err =
+      mode === 'in'
+        ? await account.signIn(email, password)
+        : mode === 'up'
+          ? await account.signUp(email, password, username)
+          : await account.sendReset(email)
     setBusy(false)
-    say(err || '')
+    say(err || (mode === 'reset' ? 'If that email has an account, a reset link is on its way.' : ''))
   }
 
   return (
     <>
       <div style={{ ...mutedStyle, marginBottom: 12 }}>
-        Sign in to keep your history synced across devices and watch shows with friends. Without an account,
-        everything stays on this device.
+        {mode === 'reset'
+          ? 'Enter the email you signed up with and we will send a link to choose a new password.'
+          : 'Sign in to keep your history synced across devices and watch shows with friends. Without an account, everything stays on this device.'}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {mode === 'up' && (
@@ -142,33 +166,78 @@ function SignedOut({ account, say }) {
           onChange={(ev) => setEmail(ev.target.value)}
           style={inputStyle}
         />
-        <input
-          className="tl-focus-inset1"
-          type="password"
-          autoComplete={mode === 'in' ? 'current-password' : 'new-password'}
-          placeholder="Password"
-          aria-label="Password"
-          value={password}
-          onChange={(ev) => setPassword(ev.target.value)}
-          style={inputStyle}
-        />
+        {mode !== 'reset' && (
+          <input
+            className="tl-focus-inset1"
+            type="password"
+            autoComplete={mode === 'in' ? 'current-password' : 'new-password'}
+            placeholder="Password"
+            aria-label="Password"
+            value={password}
+            onChange={(ev) => setPassword(ev.target.value)}
+            style={inputStyle}
+          />
+        )}
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
         <button className="tl-focus" onClick={submit} disabled={busy} style={primaryButton}>
-          {mode === 'in' ? 'Sign in' : 'Create account'}
+          {mode === 'in' ? 'Sign in' : mode === 'up' ? 'Create account' : 'Send reset link'}
         </button>
         <button
           className="tl-focus tl-hover-pill"
-          onClick={() => {
-            setMode(mode === 'in' ? 'up' : 'in')
-            say('')
-          }}
+          onClick={() => switchTo(mode === 'in' ? 'up' : 'in')}
           disabled={busy}
           style={{ ...quietButton, borderRadius: 10, padding: '11px 16px', minHeight: 44 }}
         >
-          {mode === 'in' ? 'Create account' : 'I have an account'}
+          {mode === 'in' ? 'Create account' : mode === 'up' ? 'I have an account' : 'Back to sign in'}
         </button>
       </div>
+      {mode === 'in' && (
+        <button className="tl-focus-r6" onClick={() => switchTo('reset')} disabled={busy} style={linkButton}>
+          Forgot password?
+        </button>
+      )}
+    </>
+  )
+}
+
+/**
+ * Where a password-reset link lands: the link has already signed you in, and
+ * this is the one thing left to do with it.
+ */
+function SetPassword({ account, say }) {
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  return (
+    <>
+      <div style={{ ...mutedStyle, marginBottom: 12, overflowWrap: 'anywhere' }}>
+        Choose a new password for {account.email}.
+      </div>
+      <input
+        className="tl-focus-inset1"
+        type="password"
+        autoComplete="new-password"
+        placeholder="New password"
+        aria-label="New password"
+        value={password}
+        onChange={(ev) => setPassword(ev.target.value)}
+        style={inputStyle}
+      />
+      <button
+        className="tl-focus"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true)
+          say('')
+          const err = await account.setPassword(password)
+          setBusy(false)
+          say(err || 'Password saved. Use it the next time you sign in.')
+        }}
+        style={{ ...primaryButton, marginTop: 12 }}
+      >
+        Save password
+      </button>
     </>
   )
 }
@@ -576,8 +645,9 @@ function Prompts({ account }) {
 }
 
 export default function Account({ account }) {
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState(account.linkError || '')
   const signedIn = !!account.email
+  const recovering = signedIn && account.recovering
 
   return (
     <>
@@ -589,8 +659,9 @@ export default function Account({ account }) {
 
       <div style={{ ...cardStyle, marginTop: 6 }}>
         {!signedIn && <SignedOut account={account} say={setMessage} />}
-        {signedIn && account.needsUsername && <ChooseUsername account={account} say={setMessage} />}
-        {signedIn && !account.needsUsername && (
+        {recovering && <SetPassword account={account} say={setMessage} />}
+        {signedIn && !recovering && account.needsUsername && <ChooseUsername account={account} say={setMessage} />}
+        {signedIn && !recovering && !account.needsUsername && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ font: "500 15px 'Inter Tight', sans-serif", overflowWrap: 'anywhere' }}>
