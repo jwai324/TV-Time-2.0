@@ -15,8 +15,8 @@
 create table if not exists public.recommendations (
   id uuid primary key default gen_random_uuid(),
   title_id text not null,
-  sender uuid not null references auth.users (id) on delete cascade,
-  recipient uuid not null references auth.users (id) on delete cascade,
+  sender uuid not null references neon_auth."user" (id) on delete cascade,
+  recipient uuid not null references neon_auth."user" (id) on delete cascade,
   note text,
   status text not null default 'pending' check (status in ('pending', 'accepted', 'ignored')),
   -- Null until deferred; then the moment the prompt is due again.
@@ -39,11 +39,6 @@ create index if not exists recommendations_recipient_idx
   on public.recommendations (recipient, status);
 
 alter table public.recommendations enable row level security;
-
--- Realtime sends only the primary key of a deleted row unless the whole old
--- row is replicated -- and a withdrawal is a delete, so the recipient's
--- subscription needs the recipient column to know the row was theirs.
-alter table public.recommendations replica identity full;
 
 drop policy if exists recommendations_select on public.recommendations;
 create policy recommendations_select on public.recommendations
@@ -103,13 +98,3 @@ create policy recommendations_delete on public.recommendations
   );
 
 grant select, insert, update, delete on public.recommendations to authenticated;
-
--- A recommendation should arrive while your friend is in the app, not on next
--- load -- the same as a shared mark.
-do $$
-begin
-  begin
-    alter publication supabase_realtime add table public.recommendations;
-  exception when duplicate_object then null;
-  end;
-end $$;

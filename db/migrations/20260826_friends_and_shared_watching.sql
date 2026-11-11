@@ -14,7 +14,7 @@
 -- --------------------------------------------------------------------------
 
 create table if not exists public.profiles (
-  user_id uuid primary key references auth.users (id) on delete cascade,
+  user_id uuid primary key references neon_auth."user" (id) on delete cascade,
   username text not null,
   created_at timestamptz not null default now(),
   constraint profiles_username_format check (username ~ '^[A-Za-z0-9_]{3,20}$')
@@ -50,7 +50,7 @@ returns boolean language sql security definer stable set search_path = public as
      and not exists (select 1 from public.profiles p where lower(p.username) = lower(p_username));
 $$;
 
-grant execute on function public.username_available(text) to anon, authenticated;
+grant execute on function public.username_available(text) to anonymous, authenticated;
 
 -- --------------------------------------------------------------------------
 -- friendships
@@ -58,8 +58,8 @@ grant execute on function public.username_available(text) to anon, authenticated
 
 create table if not exists public.friendships (
   id uuid primary key default gen_random_uuid(),
-  requester uuid not null references auth.users (id) on delete cascade,
-  addressee uuid not null references auth.users (id) on delete cascade,
+  requester uuid not null references neon_auth."user" (id) on delete cascade,
+  addressee uuid not null references neon_auth."user" (id) on delete cascade,
   status text not null default 'pending' check (status in ('pending', 'accepted')),
   created_at timestamptz not null default now(),
   responded_at timestamptz,
@@ -111,8 +111,8 @@ grant execute on function public.are_friends(uuid, uuid) to authenticated;
 create table if not exists public.watch_shares (
   id uuid primary key default gen_random_uuid(),
   title_id text not null,
-  inviter uuid not null references auth.users (id) on delete cascade,
-  invitee uuid not null references auth.users (id) on delete cascade,
+  inviter uuid not null references neon_auth."user" (id) on delete cascade,
+  invitee uuid not null references neon_auth."user" (id) on delete cascade,
   status text not null default 'pending' check (status in ('pending', 'accepted', 'ended')),
   created_at timestamptz not null default now(),
   ended_at timestamptz,
@@ -165,15 +165,10 @@ create table if not exists public.shared_marks (
   share_id uuid not null references public.watch_shares (id) on delete cascade,
   kind text not null check (kind in ('episode', 'movie', 'watchlist')),
   key text not null,
-  marked_by uuid not null references auth.users (id) on delete cascade,
+  marked_by uuid not null references neon_auth."user" (id) on delete cascade,
   marked_at timestamptz not null default now(),
   primary key (share_id, kind, key)
 );
-
--- Realtime sends only the primary key of a deleted row unless the whole old
--- row is replicated -- and an Undo is a delete, so the subscriber needs the
--- share id and key to act on it.
-alter table public.shared_marks replica identity full;
 
 alter table public.shared_marks enable row level security;
 
@@ -215,28 +210,13 @@ create policy shared_marks_delete on public.shared_marks
   for delete to authenticated using (public.share_live(share_id));
 
 -- --------------------------------------------------------------------------
--- grants and realtime
+-- grants
 -- --------------------------------------------------------------------------
 
 grant select, insert, update, delete on public.profiles to authenticated;
-grant select on public.profiles to anon;
 grant select, insert, update, delete on public.friendships to authenticated;
 grant select, insert, update, delete on public.watch_shares to authenticated;
 grant select, insert, delete on public.shared_marks to authenticated;
 
--- A friend's mark should land while you are both watching, not on next load.
-do $$
-begin
-  begin
-    alter publication supabase_realtime add table public.shared_marks;
-  exception when duplicate_object then null;
-  end;
-  begin
-    alter publication supabase_realtime add table public.watch_shares;
-  exception when duplicate_object then null;
-  end;
-  begin
-    alter publication supabase_realtime add table public.friendships;
-  exception when duplicate_object then null;
-  end;
-end $$;
+-- Friends' changes reach the other side by polling (see src/App.jsx), not by
+-- a database change feed, so no replication settings are needed here.
