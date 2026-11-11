@@ -102,6 +102,7 @@ returns boolean language sql security definer stable set search_path = public as
   );
 $$;
 
+revoke execute on function public.are_friends(uuid, uuid) from public;
 grant execute on function public.are_friends(uuid, uuid) to authenticated;
 
 -- --------------------------------------------------------------------------
@@ -191,6 +192,8 @@ returns boolean language sql security definer stable set search_path = public as
   );
 $$;
 
+revoke execute on function public.share_member(uuid) from public;
+revoke execute on function public.share_live(uuid) from public;
 grant execute on function public.share_member(uuid) to authenticated;
 grant execute on function public.share_live(uuid) to authenticated;
 

@@ -202,10 +202,13 @@ reproduced as-is:
 Titles come from [TMDB](https://www.themoviedb.org/), behind the same three
 async functions the app has always used — `getTitle`, `getTrending`,
 `searchTitles` in `src/data/catalog.js`. Requests go through the `tmdb`
-Supabase Edge Function (`supabase/functions/tmdb/index.ts`), which attaches
-the secret TMDB read token server-side and allows only read-only catalog
-paths, so no credential ships in the bundle. The function needs a
-`TMDB_TOKEN` secret set in the Supabase dashboard.
+Neon Function (`functions/tmdb/index.mjs`), which attaches the secret TMDB
+read token server-side and allows only read-only catalog paths, so no
+credential ships in the bundle. The function needs a `TMDB_TOKEN`
+environment variable, set in the Neon Console (project `tideline` →
+Functions → `tmdb`). To redeploy it after a code change, zip `index.mjs`
+and deploy it as slug `tmdb` on the `main` branch (`neon functions deploy
+tmdb --src functions/tmdb --no-bundle`, or ask Claude).
 
 Ids carry the media type (`tv-1396`, `movie-603`) because TMDB's movie and TV
 id spaces overlap. Two mapping decisions to know about: season 0 ("Specials")
@@ -230,13 +233,15 @@ so they are stored as arrays and rehydrated on read. When storage is
 unavailable (private browsing, a blocked origin), the app says so in a banner
 and runs from memory for the session.
 
-Signing in (the Account tab) syncs that same record to a Supabase
+Signing in (the Account tab) syncs that same record to the `tideline` Neon
 project — one `user_state` row per user holding the record as jsonb, guarded
-by row-level security so each user can only ever touch their own row. The app
-stays a static bundle: `supabase-js` talks to the project straight from the
-browser, so nothing about the GitHub Pages hosting changes, and the
-publishable key in `src/lib/supabase.js` is the client key Supabase designs
-to be shipped publicly.
+by row-level security so each user can only ever touch their own row.
+Accounts are Neon Auth (Managed Better Auth); tables are reached through the
+Neon Data API. The app stays a static bundle: `@neon/neon-js` (its
+Supabase-compatible client) talks to the project straight from the browser,
+so nothing about the GitHub Pages hosting changes. The two URLs in
+`src/lib/neon.js` are public by design; what a request may touch is decided
+by the signed-in user's token and the policies in `db/migrations`.
 
 How the sync behaves:
 
@@ -263,30 +268,24 @@ How the sync behaves:
   it is about to replace. The trade-off, stated plainly: two devices on one
   account that both hold unsynced changes do not merge — the last to sync
   wins.
-- Account creation may ask you to confirm your email; the confirmation link's
-  landing page is configured in the Supabase dashboard (Auth → URL
-  Configuration), so set the Site URL there to the deployed URL if you want
-  that link to land somewhere sensible. The username you picked at sign-up is
-  held until that round-trip brings a session back, then claimed.
+- Email verification is off, so sign-up signs you straight in and claims the
+  username you picked. (If it is ever turned on, the username is held until a
+  session comes back, then claimed.)
 - **A forgotten password is reset by email.** *Forgot password?* on the
-  sign-in card asks Supabase for a reset link that comes back to the page it
-  was requested from. The link signs you in and opens the Account tab on a
-  new-password form; saving it puts the card back to the signed-in row. An
-  expired or already-used link opens the same tab with Supabase's reason, once.
-  Two dashboard settings decide whether this works: the deployed URL
-  (`https://jwai324.github.io/TV-Time-2.0/`) must be the Site URL or on the
-  Redirect URLs list (Auth → URL Configuration), or the link lands on the Site
-  URL instead; and without a custom SMTP server, Supabase sends only to
-  members of the project's organization, a few emails an hour — anyone else
-  gets *Email address not authorized*.
+  sign-in card asks Neon Auth for a reset link that comes back to the page it
+  was requested from with a one-time `?token=`. That opens the Account tab on
+  a new-password form; saving it spends the token, and you then sign in with
+  the new password. An expired or already-used link opens the same tab with a
+  note saying so, once. The deployed origin (`https://jwai324.github.io`) is on
+  the project's trusted-domains list (Neon Console → Auth), which the redirect
+  needs; mail goes out from Neon's shared sender.
+- **Sign-in in this tab.** Neon Auth's state-change callback reports changes
+  made in other tabs only, so the account actions re-read the session
+  themselves after signing in, signing up or signing out.
 
-The project is on Supabase's free plan, which pauses a project after 7 days
-without traffic. A paused project takes the `tmdb` proxy down with it, so the
-site hangs on "Loading…" or opens with no titles. Restore it from the
-Supabase dashboard; `.github/workflows/keep-supabase-awake.yml` reads from it
-every 3 days so it never goes idle long enough to pause. GitHub turns off
-scheduled workflows in a repo with no commits for 60 days (it emails first),
-so after a long quiet spell, re-enable it from the Actions tab.
+Neon's free plan scales the database to zero when idle but never pauses the
+project, so there is no keep-awake job; the first request after a quiet spell
+just takes a moment longer.
 
 ## Friends, and watching a show together
 
@@ -322,10 +321,11 @@ twice. Pair up on a title and one **Mark watched** counts for both of you.
   direction: only marks made after the invitation is accepted are shared. This
   does mean two people who share a show mid-run can show different progress on
   it, which is the honest reading of "we started watching this together now".
-- **It lands live.** A friend's mark appears within a second, over Supabase
-  Realtime — no reload, no refresh. Coming back to the app re-reads the shared
-  marks as well, so a socket that was asleep or blocked cannot leave you
-  behind. That read walks the marks in pages: the API answers a single read
+- **It lands on its own.** A friend's mark appears within about 15 seconds:
+  while the app is on screen it re-reads friends, shares, marks and
+  recommendations on a timer — no reload, no refresh. Coming back to the app
+  re-reads at once, so a phone that was asleep catches up the moment it is
+  looked at. That read walks the marks in pages: the API answers a single read
   with at most a thousand rows and says nothing when it stops short, and a
   few long shows watched together pass that quietly — a short read would
   have replaced the marks on screen with a subset, un-ticking the newest
@@ -398,9 +398,9 @@ status: the row stays `pending` and `remind_at` says when the question is due
 again, which is why "ask me later" is an open question rather than an answer,
 and why overriding your own deferral needs nothing written at all.
 
-The five tables (`profiles`, `friendships`, `watch_shares`, `shared_marks`,
-`recommendations`), their policies and the realtime publication are in
-[`supabase/migrations`](./supabase/migrations/), applied to the project.
+The tables (`user_state`, `profiles`, `friendships`, `watch_shares`,
+`shared_marks`, `recommendations`) and their policies are in
+[`db/migrations`](./db/migrations/), applied to the Neon project.
 
 ## The donation banner
 
@@ -447,8 +447,8 @@ scream rather than showing her the face. Three details worth naming:
   one gap, stated plainly: a session of hers that was already open elsewhere
   when it went off is not told, so a mark made there before that session
   reloads sets it off there too.
-- **Only her own tap counts.** A friend's mark on a shared show arrives over
-  realtime, not through the mark funnel, so it cannot set it off. Signed out,
+- **Only her own tap counts.** A friend's mark on a shared show arrives by the
+  social re-read, not through the mark funnel, so it cannot set it off. Signed out,
   or signed in as anyone else, nothing is armed.
 
 Aiming another one is a new entry in `PRANKS` with a key nobody has been hit
@@ -513,7 +513,8 @@ title and by genre, watchlist toggles, rating (including clearing it),
 persistence across a reload, empty states, and the dark theme.
 
 The forgot-password flow was driven in Chromium against a mocked Supabase
-project — 23 checks: *Forgot password?* shows on the sign-in card at a 44px
+project (before the move to Neon; the Neon reset flow differs as described
+under *State, storage and sync*) — 23 checks: *Forgot password?* shows on the sign-in card at a 44px
 target, reset mode drops the password field, the request carries the trimmed
 address and a redirect back to the page, and *Back to sign in* restores the
 card. A recovery link opens on the Account tab naming the account, leaves no

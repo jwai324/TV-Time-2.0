@@ -187,17 +187,17 @@ export function withdrawActivity(user, titleId, label, sk) {
 }
 
 /**
- * Remote round-trip against the Supabase `user_state` row. Row-level security
+ * Remote round-trip against the `user_state` row (Neon Data API). Row-level security
  * scopes every query to the signed-in user, so reads take no id at all.
  */
-export async function fetchRemoteUser(supabase) {
-  const { data, error } = await supabase.from('user_state').select('data').maybeSingle()
+export async function fetchRemoteUser(client) {
+  const { data, error } = await client.from('user_state').select('data').maybeSingle()
   if (error) throw error
   return data ? reviveUser(data.data) : null
 }
 
-export async function pushRemoteUser(supabase, userId, user) {
-  const { error } = await supabase
+export async function pushRemoteUser(client, userId, user) {
+  const { error } = await client
     .from('user_state')
     .upsert({ user_id: userId, data: serializeUser(user) })
   if (error) throw error

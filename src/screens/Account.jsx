@@ -202,8 +202,8 @@ function SignedOut({ account, say }) {
 }
 
 /**
- * Where a password-reset link lands: the link has already signed you in, and
- * this is the one thing left to do with it.
+ * Where a password-reset link lands. The link carries a one-time token rather
+ * than a session: saving the new password spends it, and then you sign in.
  */
 function SetPassword({ account, say }) {
   const [password, setPassword] = useState('')
@@ -212,7 +212,7 @@ function SetPassword({ account, say }) {
   return (
     <>
       <div style={{ ...mutedStyle, marginBottom: 12, overflowWrap: 'anywhere' }}>
-        Choose a new password for {account.email}.
+        Choose a new password for your account.
       </div>
       <input
         className="tl-focus-inset1"
@@ -232,7 +232,7 @@ function SetPassword({ account, say }) {
           say('')
           const err = await account.setPassword(password)
           setBusy(false)
-          say(err || 'Password saved. Use it the next time you sign in.')
+          say(err || 'Password saved. Sign in with it below.')
         }}
         style={{ ...primaryButton, marginTop: 12 }}
       >
@@ -647,7 +647,7 @@ function Prompts({ account }) {
 export default function Account({ account }) {
   const [message, setMessage] = useState(account.linkError || '')
   const signedIn = !!account.email
-  const recovering = signedIn && account.recovering
+  const recovering = account.recovering
 
   return (
     <>
@@ -658,7 +658,7 @@ export default function Account({ account }) {
       </div>
 
       <div style={{ ...cardStyle, marginTop: 6 }}>
-        {!signedIn && <SignedOut account={account} say={setMessage} />}
+        {!signedIn && !recovering && <SignedOut account={account} say={setMessage} />}
         {recovering && <SetPassword account={account} say={setMessage} />}
         {signedIn && !recovering && account.needsUsername && <ChooseUsername account={account} say={setMessage} />}
         {signedIn && !recovering && !account.needsUsername && (

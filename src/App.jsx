@@ -54,13 +54,12 @@ import {
   removeMarks,
   sendFriendRequest,
   sendRecommendation,
-  subscribeSocial,
   usernameAvailable,
   usernameProblem,
 } from './lib/social.js'
 import { ALWAYS, ASK, loadPrefs, NEVER, persistPrefs } from './lib/prefs.js'
 import { carryPrankNotes, duePrank, isWatchedMark, markPrankFired } from './lib/pranks.js'
-import { arrivedFromRecovery, linkError, supabase } from './lib/supabase.js'
+import { db, linkError, resetPassword, resetToken } from './lib/neon.js'
 import { clearUnsynced, createPusher, hasUnsyncedChanges } from './lib/sync.js'
 import CatchUpPrompt from './components/CatchUpPrompt.jsx'
 import DonationBanner from './components/DonationBanner.jsx'
@@ -124,6 +123,8 @@ const scoreBadge = (t) => (t.tmdbScore ? `★ ${t.tmdbScore.toFixed(1)}` : null)
 const scoreLine = (t) =>
   t.tmdbScore ? `TMDB ${t.tmdbScore.toFixed(1)} / 10 · ${votesLabel(t.tmdbVotes)} ratings` : ''
 
+// How often friends' marks, requests and recommendations are re-read while visible.
+const SOCIAL_POLL_MS = 15000
 const sameMark = (a, b) => a.share_id === b.share_id && a.kind === b.kind && a.key === b.key
 
 const EMPTY_SOCIAL = { friendships: [], shares: [], names: {}, marks: [], recommendations: [] }
@@ -161,8 +162,8 @@ export default function App() {
   const [storageFailed, setStorageFailed] = useState(false)
   const [syncFailed, setSyncFailed] = useState(false)
   const [session, setSession] = useState(null)
-  // Signed in by a password-reset link, and not yet past choosing the new one.
-  const [recovering, setRecovering] = useState(arrivedFromRecovery)
+  // Arrived by a password-reset link whose token is not yet spent on a new password.
+  const [recovering, setRecovering] = useState(!!resetToken)
   // Why an email link did not work, shown once on the Account tab it opens.
   const [linkNote, setLinkNote] = useState(linkError)
   const sessionRef = useRef(null)
@@ -186,7 +187,7 @@ export default function App() {
    * the sign-in read tell whether the record moved while it was in flight.
    */
   const pusher = useMemo(
-    () => createPusher((userId, u) => pushRemoteUser(supabase, userId, u), (ok) => setSyncFailed(!ok)),
+    () => createPusher((userId, u) => pushRemoteUser(db, userId, u), (ok) => setSyncFailed(!ok)),
     []
   )
   const localGen = useRef(0)
@@ -269,8 +270,8 @@ export default function App() {
 
   // An email link that came back for the account opens on the Account tab,
   // where its new-password form or its error is waiting.
-  const [screen, setScreen] = useState(arrivedFromRecovery || linkError ? 'account' : 'upnext')
-  const [tab, setTab] = useState(arrivedFromRecovery || linkError ? 'account' : 'upnext')
+  const [screen, setScreen] = useState(resetToken || linkError ? 'account' : 'upnext')
+  const [tab, setTab] = useState(resetToken || linkError ? 'account' : 'upnext')
   const [titleId, setTitleId] = useState(null)
 
   // The order Up Next is showing right now. It is worked out once on arrival
@@ -363,13 +364,17 @@ export default function App() {
   }, [dark])
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
-      setSession(next)
-      if (event === 'PASSWORD_RECOVERY') setRecovering(true)
-      if (event === 'SIGNED_OUT') setRecovering(false)
-    })
+    db.auth.getSession().then(({ data }) => setSession(data.session))
+    // Neon Auth reports sign-ins and sign-outs made in other tabs here, but not
+    // ones made in this tab, so the account actions below re-read the session
+    // themselves (see syncSession).
+    const { data: sub } = db.auth.onAuthStateChange((_event, next) => setSession(next))
     return () => sub.subscription.unsubscribe()
+  }, [])
+
+  const syncSession = useCallback(async () => {
+    const { data } = await db.auth.getSession()
+    setSession(data.session)
   }, [])
 
   /*
@@ -393,7 +398,7 @@ export default function App() {
         pusher.schedule(userId, userRef.current)
       } else {
         const gen = localGen.current
-        const remote = await fetchRemoteUser(supabase)
+        const remote = await fetchRemoteUser(db)
         if (localGen.current !== gen) {
           // Edited while reading: that edit is already on its way up, and the
           // record it left behind is newer than what came back.
@@ -532,40 +537,21 @@ export default function App() {
 
   /*
    * A friend's mark should land while you are both watching, not on next
-   * load. Marks arrive already applied; anything else about the friendship
-   * just triggers a re-read.
-   *
-   * The channel is keyed by the share ids rather than the share rows, so a
-   * re-read that changes nothing does not tear it down and put it back up.
+   * load. There is no change feed, so the social rows are re-read on a short
+   * timer while the app is on screen; a hidden tab skips its turn, and coming
+   * back to the front re-reads straight away (below).
    */
-  const liveShareKey = useMemo(() => liveShares.map((sh) => sh.id).sort().join(','), [liveShares])
-  const hasProfile = !!profile
   useEffect(() => {
-    if (!myId || !hasProfile) return
-    const shareIds = liveShareKey ? liveShareKey.split(',') : []
-    return subscribeSocial({
-      userId: myId,
-      shareIds,
-      onMarks: (payload) => {
-        if (payload.eventType === 'DELETE') {
-          const gone = payload.old
-          if (!gone?.share_id) return
-          noteMark(gone, false, true)
-          setMarks((prev) => prev.filter((m) => !sameMark(m, gone)))
-        } else if (payload.new) {
-          const row = payload.new
-          noteMark(row, true, true)
-          setMarks((prev) => (prev.some((m) => sameMark(m, row)) ? prev : [...prev, row]))
-        }
-      },
-      onSocial: () => refreshSocial(),
-    })
-  }, [myId, hasProfile, liveShareKey, refreshSocial, setMarks, noteMark])
+    if (!profile) return
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') refreshSocial()
+    }, SOCIAL_POLL_MS)
+    return () => clearInterval(timer)
+  }, [profile, refreshSocial])
 
   /*
-   * Realtime is the fast path, not the only one. A socket that was asleep,
-   * blocked or dropped would otherwise leave a friend's marks unseen until a
-   * reload, so coming back to the app re-reads them too.
+   * Coming back to the app re-reads at once rather than waiting for the next
+   * tick, so a phone that was asleep catches up the moment it is looked at.
    */
   useEffect(() => {
     if (!profile) return
@@ -1669,8 +1655,10 @@ export default function App() {
       // cannot take part until it picks one.
       needsUsername: !!session && !profile,
       signIn: async (email, password) => {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        return error ? error.message : null
+        const { error } = await db.auth.signInWithPassword({ email, password })
+        if (error) return error.message
+        await syncSession()
+        return null
       },
       signUp: async (email, password, username) => {
         const problem = usernameProblem(username)
@@ -1680,8 +1668,9 @@ export default function App() {
         } catch {
           return 'Could not check that username — try again.'
         }
-        const { data, error } = await supabase.auth.signUp({ email, password })
+        const { data, error } = await db.auth.signUp({ email, password })
         if (error) return error.message
+        await syncSession()
         if (!data.session) {
           // The account exists but there is no session to hang the username
           // on yet; claim it when the confirmation link brings one back.
@@ -1695,19 +1684,21 @@ export default function App() {
         }
         return null
       },
-      // Supabase does not say whether the address has an account, so the card
+      // Neon Auth does not say whether the address has an account, so the card
       // does not either.
       sendReset: async (email) => {
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        const { error } = await db.auth.resetPasswordForEmail(email.trim(), {
           redirectTo: window.location.origin + window.location.pathname,
         })
         return error ? error.message : null
       },
       recovering,
       linkError: linkNote,
+      // The reset link does not sign anyone in: it carries a one-time token
+      // that is spent here, and the new password is then used to sign in.
       setPassword: async (password) => {
-        const { error } = await supabase.auth.updateUser({ password })
-        if (error) return error.message
+        const error = await resetPassword(resetToken, password)
+        if (error) return error
         setRecovering(false)
         return null
       },
@@ -1719,7 +1710,8 @@ export default function App() {
         pusher.reset()
         syncingFor.current = null
         setSyncedFor(null)
-        await supabase.auth.signOut()
+        await db.auth.signOut()
+        setSession(null)
         setProfile(null)
         setSocial(EMPTY_SOCIAL)
         return null
@@ -1786,6 +1778,7 @@ export default function App() {
       prefs,
       setPref,
       openTitle,
+      syncSession,
     ]
   )
 

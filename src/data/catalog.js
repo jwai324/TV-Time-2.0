@@ -11,7 +11,8 @@
  * ids as opaque, so watched-episode keys like "tv-1396:2:5" work unchanged.
  */
 
-const PROXY = 'https://heaficaxneggnsayrrzs.supabase.co/functions/v1/tmdb'
+// The `tmdb` Neon Function (functions/tmdb), which holds the TMDB token.
+const PROXY = 'https://br-orange-wave-bccrqzxk-tmdb.compute.c-16.us-east-1.aws.neon.tech/'
 const IMG = 'https://image.tmdb.org/t/p/w342'
 
 async function tmdb(path, params = {}) {

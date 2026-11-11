@@ -2,7 +2,7 @@
  * Usernames, friends, the shares that make two people's "watched" one thing,
  * and the recommendations they pass each other.
  *
- * Everything here is a round-trip against Supabase. The rule the whole
+ * Everything here is a round-trip against the Neon Data API. The rule the whole
  * feature rests on: nobody ever writes to anybody else's record. A shared
  * mark is a row of its own, readable and writable by both members of the
  * share, and the client reads the union of your own record and the marks of
@@ -12,7 +12,7 @@
  * the same idea in one direction: a row only its recipient can answer.
  */
 
-import { supabase } from './supabase.js'
+import { db } from './neon.js'
 
 export const USERNAME_RULE = /^[A-Za-z0-9_]{3,20}$/
 
@@ -28,13 +28,13 @@ export function usernameProblem(name) {
 
 /** Free? Answered by a function, so sign-up can ask before there is a session. */
 export async function usernameAvailable(name) {
-  const { data, error } = await supabase.rpc('username_available', { p_username: name.trim() })
+  const { data, error } = await db.rpc('username_available', { p_username: name.trim() })
   if (error) throw error
   return data === true
 }
 
 export async function fetchProfile(userId) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('profiles')
     .select('user_id, username')
     .eq('user_id', userId)
@@ -45,7 +45,7 @@ export async function fetchProfile(userId) {
 
 export async function claimUsername(userId, name) {
   const username = name.trim()
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('profiles')
     .insert({ user_id: userId, username })
     .select('user_id, username')
@@ -58,14 +58,14 @@ export async function claimUsername(userId, name) {
 /** The handles behind a set of account ids, as `{ [userId]: username }`. */
 export async function fetchProfiles(ids) {
   if (!ids.length) return {}
-  const { data, error } = await supabase.from('profiles').select('user_id, username').in('user_id', ids)
+  const { data, error } = await db.from('profiles').select('user_id, username').in('user_id', ids)
   if (error) throw error
   return Object.fromEntries((data || []).map((p) => [p.user_id, p.username]))
 }
 
 /** Resolve a handle to an account. Null when nobody holds it. */
 export async function findByUsername(name) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('profiles')
     .select('user_id, username')
     .ilike('username', name.trim())
@@ -77,7 +77,7 @@ export async function findByUsername(name) {
 // --- friends ---------------------------------------------------------------
 
 export async function fetchFriendships() {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('friendships')
     .select('id, requester, addressee, status, created_at')
   if (error) throw error
@@ -89,7 +89,7 @@ export async function sendFriendRequest(myId, username) {
   if (!target) return { error: `No account called ${username.trim()}.` }
   if (target.user_id === myId) return { error: 'That is you.' }
 
-  const { error } = await supabase
+  const { error } = await db
     .from('friendships')
     .insert({ requester: myId, addressee: target.user_id, status: 'pending' })
   if (error) {
@@ -100,7 +100,7 @@ export async function sendFriendRequest(myId, username) {
 }
 
 export async function acceptFriendRequest(id) {
-  const { error } = await supabase
+  const { error } = await db
     .from('friendships')
     .update({ status: 'accepted', responded_at: new Date().toISOString() })
     .eq('id', id)
@@ -109,14 +109,14 @@ export async function acceptFriendRequest(id) {
 
 /** Declining, withdrawing and unfriending are all this row going away. */
 export async function removeFriendship(id) {
-  const { error } = await supabase.from('friendships').delete().eq('id', id)
+  const { error } = await db.from('friendships').delete().eq('id', id)
   if (error) throw error
 }
 
 // --- shares ----------------------------------------------------------------
 
 export async function fetchShares() {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('watch_shares')
     .select('id, title_id, inviter, invitee, status, created_at')
   if (error) throw error
@@ -124,7 +124,7 @@ export async function fetchShares() {
 }
 
 export async function inviteToWatch(myId, friendId, titleId) {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('watch_shares')
     .insert({ title_id: titleId, inviter: myId, invitee: friendId, status: 'pending' })
     .select('id, title_id, inviter, invitee, status')
@@ -137,13 +137,13 @@ export async function inviteToWatch(myId, friendId, titleId) {
 }
 
 export async function acceptShare(id) {
-  const { error } = await supabase.from('watch_shares').update({ status: 'accepted' }).eq('id', id)
+  const { error } = await db.from('watch_shares').update({ status: 'accepted' }).eq('id', id)
   if (error) throw error
 }
 
 /** Decline or withdraw an invitation that was never accepted. */
 export async function dropShare(id) {
-  const { error } = await supabase.from('watch_shares').delete().eq('id', id)
+  const { error } = await db.from('watch_shares').delete().eq('id', id)
   if (error) throw error
 }
 
@@ -156,7 +156,7 @@ export async function dropShare(id) {
  * (see `materializeShare` in App), after which the share is inert.
  */
 export async function endShare(id) {
-  const { error } = await supabase
+  const { error } = await db
     .from('watch_shares')
     .update({ status: 'ended', ended_at: new Date().toISOString() })
     .eq('id', id)
@@ -179,7 +179,7 @@ const MARKS_PAGE = 1000
  * pages, in primary-key order so nothing is skipped or seen twice, until the
  * count the server reports alongside each page has been reached.
  */
-export async function fetchMarks(shareIds, client = supabase) {
+export async function fetchMarks(shareIds, client = db) {
   if (!shareIds.length) return []
   const rows = []
   for (;;) {
@@ -201,7 +201,7 @@ export async function fetchMarks(shareIds, client = supabase) {
 
 export async function addMarks(shareId, myId, entries) {
   if (!entries.length) return
-  const { error } = await supabase.from('shared_marks').upsert(
+  const { error } = await db.from('shared_marks').upsert(
     entries.map(({ kind, key }) => ({ share_id: shareId, kind, key, marked_by: myId })),
     { onConflict: 'share_id,kind,key', ignoreDuplicates: true }
   )
@@ -217,7 +217,7 @@ export async function addMarks(shareId, myId, entries) {
  */
 export async function removeMarks(shareId, kind, keys) {
   if (!keys.length) return
-  const { error } = await supabase
+  const { error } = await db
     .from('shared_marks')
     .delete()
     .eq('share_id', shareId)
@@ -227,7 +227,7 @@ export async function removeMarks(shareId, kind, keys) {
 }
 
 export async function removeMark(shareId, kind, key) {
-  const { error } = await supabase
+  const { error } = await db
     .from('shared_marks')
     .delete()
     .eq('share_id', shareId)
@@ -245,7 +245,7 @@ export const RECOMMENDATION_NOTE_MAX = 280
 export const DEFER_DAYS = 3
 
 export async function fetchRecommendations() {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('recommendations')
     .select('id, title_id, sender, recipient, note, status, remind_at, created_at')
   if (error) throw error
@@ -260,7 +260,7 @@ export async function fetchRecommendations() {
  */
 export async function sendRecommendation(myId, friendId, titleId, note) {
   const trimmed = (note || '').trim()
-  const { error } = await supabase.from('recommendations').insert({
+  const { error } = await db.from('recommendations').insert({
     title_id: titleId,
     sender: myId,
     recipient: friendId,
@@ -276,7 +276,7 @@ export async function sendRecommendation(myId, friendId, titleId, note) {
 
 /** Watchlist it, or pass on it. Either way the question is settled. */
 export async function answerRecommendation(id, status) {
-  const { error } = await supabase
+  const { error } = await db
     .from('recommendations')
     .update({ status, remind_at: null, responded_at: new Date().toISOString() })
     .eq('id', id)
@@ -291,54 +291,12 @@ export async function answerRecommendation(id, status) {
  */
 export async function deferRecommendation(id, days = DEFER_DAYS) {
   const when = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
-  const { error } = await supabase.from('recommendations').update({ remind_at: when }).eq('id', id)
+  const { error } = await db.from('recommendations').update({ remind_at: when }).eq('id', id)
   if (error) throw error
 }
 
 /** Take back one you sent, or clear one you have already answered. */
 export async function dropRecommendation(id) {
-  const { error } = await supabase.from('recommendations').delete().eq('id', id)
+  const { error } = await db.from('recommendations').delete().eq('id', id)
   if (error) throw error
-}
-
-// --- realtime --------------------------------------------------------------
-
-/**
- * Watch everything that can change under you: a friend's mark on a show you
- * share, a request, an invitation, a share ending, a title a friend has just
- * recommended.
- *
- * Marks are subscribed per share rather than table-wide. Realtime cannot
- * apply row-level security to a delete — the old row it sends carries no more
- * than what is replicated — so filtering by the share ids you belong to is
- * what keeps other people's deletes out of your channel.
- */
-export function subscribeSocial({ userId, shareIds, onMarks, onSocial }) {
-  const channel = supabase.channel(`tideline:${userId}`)
-
-  shareIds.forEach((id) => {
-    channel.on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'shared_marks', filter: `share_id=eq.${id}` },
-      (payload) => onMarks(payload)
-    )
-  })
-
-  ;[
-    ['friendships', 'requester'],
-    ['friendships', 'addressee'],
-    ['watch_shares', 'inviter'],
-    ['watch_shares', 'invitee'],
-    ['recommendations', 'sender'],
-    ['recommendations', 'recipient'],
-  ].forEach(([table, column]) => {
-    channel.on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table, filter: `${column}=eq.${userId}` },
-      () => onSocial()
-    )
-  })
-
-  channel.subscribe()
-  return () => supabase.removeChannel(channel)
 }
